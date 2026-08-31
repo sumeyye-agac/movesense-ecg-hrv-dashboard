@@ -45,6 +45,7 @@ class MovesenseBLE:
         self.client: Optional[BleakClient] = None
         self.on_hr = on_hr
         self.on_ecg_raw = on_ecg_raw
+        self.gsp_available = False
 
     @staticmethod
     async def discover(name_hint: str = "Movesense", timeout: float = 8.0):
@@ -59,17 +60,24 @@ class MovesenseBLE:
         # 1) Standard Heart Rate Service - works immediately, no handshake needed
         await self.client.start_notify(HRS_MEASUREMENT_UUID, self._handle_hr)
 
-        # 2) Movesense GSP - say hello, then subscribe to raw ECG
-        await self.client.start_notify(GSP_NOTIFY_UUID, self._handle_gsp)
-        await self._gsp_send(CMD_HELLO, ref=1, data=b"")
-        await self._gsp_subscribe("/Meas/Ecg/200/mV", ref=ECG_SUBSCRIBE_REF)
+        # 2) Movesense GSP - optional: older firmware (<2.3.0) doesn't expose
+        # this characteristic at all, so a missing GSP shouldn't take HR down
+        # with it.
+        try:
+            await self.client.start_notify(GSP_NOTIFY_UUID, self._handle_gsp)
+            await self._gsp_send(CMD_HELLO, ref=1, data=b"")
+            await self._gsp_subscribe("/Meas/Ecg/200/mV", ref=ECG_SUBSCRIBE_REF)
+            self.gsp_available = True
+        except Exception as e:
+            print(f"GSP not available on this sensor (likely firmware < 2.3.0): {e}")
 
     async def disconnect(self):
         if self.client and self.client.is_connected:
-            try:
-                await self._gsp_send(CMD_UNSUBSCRIBE, ref=ECG_SUBSCRIBE_REF, data=b"")
-            except Exception:
-                pass
+            if self.gsp_available:
+                try:
+                    await self._gsp_send(CMD_UNSUBSCRIBE, ref=ECG_SUBSCRIBE_REF, data=b"")
+                except Exception:
+                    pass
             await self.client.disconnect()
 
     @property

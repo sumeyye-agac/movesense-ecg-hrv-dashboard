@@ -39,8 +39,7 @@ async def broadcast(message: dict):
         return
     data = json.dumps(message)
     dead = []
-    # Snapshot: a client can connect or drop while we're awaiting a send.
-    for ws in list(connected_clients):
+    for ws in connected_clients:
         try:
             await ws.send_text(data)
         except Exception:
@@ -78,6 +77,7 @@ async def lifespan(app: FastAPI):
         try:
             await ble_client.connect()
             print(f"Connected to Movesense sensor at {MOVESENSE_ADDRESS}")
+            print(f"GSP (ECG) available: {ble_client.gsp_available}")
         except Exception as e:
             print(f"Could not connect to Movesense sensor: {e}")
             ble_client = None
@@ -110,8 +110,6 @@ async def ws_endpoint(websocket: WebSocket):
             # the connection open and detects disconnects.
             await websocket.receive_text()
     except WebSocketDisconnect:
-        pass
-    finally:
         connected_clients.discard(websocket)
 
 

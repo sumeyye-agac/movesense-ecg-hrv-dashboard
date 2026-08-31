@@ -12,10 +12,12 @@ streams the result to a browser dashboard in real time.
 
 ## Requirements
 
-- A Movesense MD sensor on **firmware 2.3.0 or later** (2.3.1 for the MD/
-  medical variant specifically). GSP shipped as part of the default
-  firmware starting there; on older firmware the GSP subscribe in this
-  repo won't get a response. Check/update via the Movesense Showcase app.
+- A Movesense MD sensor. Heart rate and HRV work on any firmware, since
+  they come over the standard BLE Heart Rate Service. The ECG path needs
+  **firmware 2.3.0 or later** (2.3.1 for the MD/medical variant), which is
+  where GSP became part of the default firmware — on older firmware the
+  backend logs that GSP is unavailable and keeps streaming heart rate.
+  Check/update via the Movesense Showcase app.
 - Python 3.10+, and a machine with BLE (macOS, Linux, or Windows).
 
 ## Architecture
@@ -57,7 +59,9 @@ uvicorn main:app --reload
 ```
 
 Then open `frontend/index.html` in a browser (or serve it with any static
-file server). It connects to `ws://localhost:8000/ws`.
+file server). It connects to `ws://localhost:8000/ws`. Chart.js is vendored
+at `frontend/vendor/chart.umd.js`, so the dashboard needs no network access
+of its own.
 
 ## Configuration
 
