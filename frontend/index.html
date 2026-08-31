@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Movesense Live</title>
+<link rel="icon" href="data:,">
 <script src="vendor/chart.umd.js"></script>
 <style>
   :root {
@@ -59,9 +60,31 @@
   .status {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
     font-size: 13px;
     color: var(--text-dim);
+  }
+
+  .last-update {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .gsp-badge {
+    font-size: 11px;
+    padding: 3px 9px;
+    border-radius: 100px;
+    border: 1px solid var(--panel-border);
+  }
+
+  .gsp-badge.available {
+    color: var(--accent);
+    border-color: var(--accent-dim);
+  }
+
+  .gsp-badge.unavailable {
+    color: var(--warn);
+    border-color: #6B4E1F;
   }
 
   .dot {
@@ -181,6 +204,8 @@
     <div class="device" id="deviceAddress">connecting to backend&hellip;</div>
   </div>
   <div class="status">
+    <span class="last-update" id="lastUpdate"></span>
+    <span class="gsp-badge" id="gspBadge" style="display: none;"></span>
     <span class="dot" id="statusDot"></span>
     <span id="statusText">offline</span>
   </div>
@@ -194,16 +219,16 @@
 
   <div class="panel">
     <div class="hrv-value mono"><span id="sdnnValue">--</span><span class="hrv-unit">ms</span></div>
-    <div class="bpm-label">HRV (SDNN, last 300 beats)</div>
+    <div class="bpm-label">HRV (SDNN, last 60 beats)</div>
   </div>
 
   <div class="panel chart-panel">
-    <h2>Heart rate — last 300 s</h2>
+    <h2>Heart rate — last 60 s</h2>
     <canvas id="hrChart"></canvas>
   </div>
 
   <div class="panel chart-panel">
-    <h2>HRV (SDNN) — last 300 s</h2>
+    <h2>HRV (SDNN) — last 60 s</h2>
     <canvas id="hrvChart"></canvas>
   </div>
 
@@ -236,6 +261,8 @@
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
   const deviceAddress = document.getElementById('deviceAddress');
+  const gspBadge = document.getElementById('gspBadge');
+  const lastUpdateEl = document.getElementById('lastUpdate');
   const bpmValue = document.getElementById('bpmValue');
   const sdnnValue = document.getElementById('sdnnValue');
   const ecgPackets = document.getElementById('ecgPackets');
@@ -249,6 +276,7 @@
   let ecgByteCountThisSecond = 0;
   let imuPacketCount = 0;
   let imuByteCountThisSecond = 0;
+  let lastMessageAt = null;
 
   const hrChart = new Chart(document.getElementById('hrChart'), {
     type: 'line',
@@ -322,7 +350,7 @@
     const hrData = hrChart.data;
     hrData.labels.push(label);
     hrData.datasets[0].data.push(bpm);
-    if (hrData.labels.length > 300) {
+    if (hrData.labels.length > 60) {
       hrData.labels.shift();
       hrData.datasets[0].data.shift();
     }
@@ -333,7 +361,7 @@
     const hrvData = hrvChart.data;
     hrvData.labels.push(label);
     hrvData.datasets[0].data.push(sdnnMs);
-    if (hrvData.labels.length > 300) {
+    if (hrvData.labels.length > 60) {
       hrvData.labels.shift();
       hrvData.datasets[0].data.shift();
     }
@@ -347,13 +375,31 @@
     imuByteCountThisSecond = 0;
   }, 1000);
 
+  setInterval(() => {
+    if (lastMessageAt == null) {
+      lastUpdateEl.textContent = '';
+      return;
+    }
+    const secondsAgo = Math.round((Date.now() - lastMessageAt) / 1000);
+    lastUpdateEl.textContent = secondsAgo <= 1 ? 'updated just now' : `updated ${secondsAgo}s ago`;
+  }, 1000);
+
   async function fetchStatus() {
     try {
       const res = await fetch(`http://${BACKEND_HOST}/status`);
       const data = await res.json();
       deviceAddress.textContent = data.address ? data.address : 'no MOVESENSE_ADDRESS set';
+      gspBadge.style.display = 'inline-block';
+      if (data.gsp_available) {
+        gspBadge.textContent = 'GSP: available';
+        gspBadge.className = 'gsp-badge available';
+      } else {
+        gspBadge.textContent = 'GSP: unavailable (firmware update needed)';
+        gspBadge.className = 'gsp-badge unavailable';
+      }
     } catch {
       deviceAddress.textContent = 'backend unreachable';
+      gspBadge.style.display = 'none';
     }
   }
 
@@ -363,6 +409,7 @@
     ws.onopen = () => {
       statusDot.classList.add('live');
       statusText.textContent = 'live';
+      fetchStatus();
     };
 
     ws.onclose = () => {
@@ -373,6 +420,7 @@
 
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data);
+      lastMessageAt = Date.now();
       if (msg.type === 'hr') {
         pushHR(msg.bpm, msg.sdnn_ms);
       } else if (msg.type === 'ecg_raw') {

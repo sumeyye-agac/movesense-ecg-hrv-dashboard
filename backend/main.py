@@ -29,7 +29,7 @@ main_loop: asyncio.AbstractEventLoop | None = None
 # Rolling window for a simple SDNN (HRV) estimate. This is standard
 # deviation of raw RR intervals with no artifact/ectopic-beat filtering,
 # so treat it as a rough live indicator, not a clinical HRV metric.
-RR_WINDOW_SIZE = 300
+RR_WINDOW_SIZE = 60
 SDNN_MIN_SAMPLES = 10
 rr_window: deque[float] = deque(maxlen=RR_WINDOW_SIZE)
 
@@ -128,4 +128,5 @@ async def status():
     return {
         "connected": bool(ble_client and ble_client.is_connected),
         "address": MOVESENSE_ADDRESS,
+        "gsp_available": bool(ble_client and ble_client.gsp_available),
     }

@@ -5,16 +5,11 @@
 > yet, so the dashboard only reports that packets are arriving. Interfaces
 > and layout may still change.
 
-Real-time heart-rate, ECG, and IMU streaming from a Movesense MD sensor
-to a browser dashboard, over Bluetooth Low Energy — no phone app in the
-middle.
-
-## Demo
-
-A pipeline that reads live ECG, IMU9, and heart-rate data off a
-Movesense medical sensor over Bluetooth Low Energy, decodes it against
-the vendor's own GATT protocol spec, computes a live HRV estimate, and
-streams the result to a browser dashboard in real time.
+Streams live heart rate and HRV from a Movesense MD sensor to a browser
+dashboard over Bluetooth Low Energy — no phone app in the middle. ECG
+and IMU9 packets are also captured live over the same BLE link;
+decoding their raw payload into a waveform is the one piece not wired
+up yet (see [Architecture](#architecture) below).
 
 ## Requirements
 
@@ -22,7 +17,7 @@ streams the result to a browser dashboard in real time.
   they come over the standard BLE Heart Rate Service. The ECG and IMU9
   paths need **firmware 2.3.0 or later** (2.3.1 for the MD/medical
   variant), which is where GSP became part of the default firmware — on
-  older firmware the backend logs that GSP is unavailable and keeps
+  older firmware the dashboard shows a "GSP: unavailable" badge and keeps
   streaming heart rate. Check/update via the Movesense Showcase app.
 - Python 3.10+, and a machine with BLE (macOS, Linux, or Windows).
 
@@ -39,7 +34,7 @@ Two data paths run side by side:
 - **Heart rate + HRV** — via the standard Bluetooth Heart Rate Service
   (BLE SIG spec, service 0x180D / characteristic 0x2A37). Bpm arrives
   pre-decoded; when the sensor also includes RR-intervals (flags bit 4),
-  the backend keeps a rolling window of the last 300 and reports a live
+  the backend keeps a rolling window of the last 60 and reports a live
   SDNN (standard deviation of RR intervals) as a rough HRV indicator.
   This is a simple, unfiltered SDNN — no ectopic-beat correction — so
   treat it as a live signal, not a clinical HRV number. Fully working.
