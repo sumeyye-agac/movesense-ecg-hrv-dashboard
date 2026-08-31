@@ -1,5 +1,10 @@
 # Movesense Live Dashboard
 
+> **Status: under development.** Heart rate and HRV are working end to
+> end. ECG and IMU9 stream over GSP but the SBEM payloads aren't decoded
+> yet, so the dashboard only reports that packets are arriving. Interfaces
+> and layout may still change.
+
 Real-time heart-rate, ECG, and IMU streaming from a Movesense MD sensor
 to a browser dashboard, over Bluetooth Low Energy — no phone app in the
 middle.
