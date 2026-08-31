@@ -81,7 +81,7 @@
     max-width: 1040px;
     margin: 0 auto;
     display: grid;
-    grid-template-columns: 200px 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 20px;
   }
 
@@ -115,31 +115,17 @@
     margin-left: 6px;
   }
 
-  .side-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-  }
-
   .hrv-value {
-    font-size: 40px;
+    font-size: 56px;
     font-weight: 600;
     line-height: 1;
     color: var(--warn);
   }
 
   .hrv-unit {
-    font-size: 14px;
+    font-size: 16px;
     color: var(--text-dim);
     margin-left: 6px;
-  }
-
-  .chart-panel {
-    grid-column: 2;
-  }
-
-  @media (max-width: 640px) {
-    .chart-panel { grid-column: 1; }
   }
 
   .chart-panel h2, .stream-panel h2 {
@@ -201,21 +187,24 @@
 </header>
 
 <main>
-  <div class="side-stack">
-    <div class="panel">
-      <div class="bpm-value mono"><span id="bpmValue">--</span><span class="bpm-unit">bpm</span></div>
-      <div class="bpm-label">Heart rate</div>
-    </div>
+  <div class="panel">
+    <div class="bpm-value mono"><span id="bpmValue">--</span><span class="bpm-unit">bpm</span></div>
+    <div class="bpm-label">Heart rate</div>
+  </div>
 
-    <div class="panel">
-      <div class="hrv-value mono"><span id="sdnnValue">--</span><span class="hrv-unit">ms</span></div>
-      <div class="bpm-label">HRV (SDNN, last 60 beats)</div>
-    </div>
+  <div class="panel">
+    <div class="hrv-value mono"><span id="sdnnValue">--</span><span class="hrv-unit">ms</span></div>
+    <div class="bpm-label">HRV (SDNN, last 60 beats)</div>
   </div>
 
   <div class="panel chart-panel">
     <h2>Heart rate — last 60 s</h2>
     <canvas id="hrChart"></canvas>
+  </div>
+
+  <div class="panel chart-panel">
+    <h2>HRV (SDNN) — last 60 beats</h2>
+    <canvas id="hrvChart"></canvas>
   </div>
 
   <div class="panel stream-panel">
@@ -280,10 +269,44 @@
       responsive: true,
       maintainAspectRatio: false,
       scales: {
-        x: { display: false },
+        x: { display: true, ticks: { display: false }, grid: { color: '#1A2129' } },
         y: {
+          suggestedMin: 40,
+          suggestedMax: 160,
           grid: { color: '#1A2129' },
-          ticks: { color: '#6B7785', font: { family: 'JetBrains Mono' } },
+          ticks: { color: '#6B7785', font: { family: 'JetBrains Mono' }, maxTicksLimit: 5 },
+        }
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+
+  const hrvChart = new Chart(document.getElementById('hrvChart'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        data: [],
+        borderColor: '#FFB84D',
+        backgroundColor: 'rgba(255, 184, 77, 0.08)',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.3,
+        fill: true,
+        spanGaps: false,
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { display: true, ticks: { display: false }, grid: { color: '#1A2129' } },
+        y: {
+          suggestedMin: 0,
+          suggestedMax: 100,
+          grid: { color: '#1A2129' },
+          ticks: { color: '#6B7785', font: { family: 'JetBrains Mono' }, maxTicksLimit: 5 },
         }
       },
       plugins: { legend: { display: false } }
@@ -295,14 +318,26 @@
     sdnnValue.textContent = sdnnMs != null ? sdnnMs : '--';
     const now = new Date();
     const label = now.toLocaleTimeString();
-    const data = hrChart.data;
-    data.labels.push(label);
-    data.datasets[0].data.push(bpm);
-    if (data.labels.length > 60) {
-      data.labels.shift();
-      data.datasets[0].data.shift();
+
+    const hrData = hrChart.data;
+    hrData.labels.push(label);
+    hrData.datasets[0].data.push(bpm);
+    if (hrData.labels.length > 60) {
+      hrData.labels.shift();
+      hrData.datasets[0].data.shift();
     }
     hrChart.update();
+
+    // sdnnMs is null until enough RR-intervals have accumulated - pushing
+    // null leaves a gap in the line instead of drawing a misleading 0.
+    const hrvData = hrvChart.data;
+    hrvData.labels.push(label);
+    hrvData.datasets[0].data.push(sdnnMs);
+    if (hrvData.labels.length > 60) {
+      hrvData.labels.shift();
+      hrvData.datasets[0].data.shift();
+    }
+    hrvChart.update();
   }
 
   setInterval(() => {
