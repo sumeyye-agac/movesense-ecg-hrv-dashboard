@@ -67,13 +67,23 @@ def on_ecg_raw(ref: int, payload: bytes):
         )
 
 
+def on_imu_raw(ref: int, payload: bytes):
+    if main_loop:
+        asyncio.run_coroutine_threadsafe(
+            broadcast({"type": "imu_raw", "ref": ref, "num_bytes": len(payload)}),
+            main_loop,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global ble_client, main_loop
     main_loop = asyncio.get_running_loop()
 
     if MOVESENSE_ADDRESS:
-        ble_client = MovesenseBLE(MOVESENSE_ADDRESS, on_hr=on_hr, on_ecg_raw=on_ecg_raw)
+        ble_client = MovesenseBLE(
+            MOVESENSE_ADDRESS, on_hr=on_hr, on_ecg_raw=on_ecg_raw, on_imu_raw=on_imu_raw
+        )
         try:
             await ble_client.connect()
             print(f"Connected to Movesense sensor at {MOVESENSE_ADDRESS}")

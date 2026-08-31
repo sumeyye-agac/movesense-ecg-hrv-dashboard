@@ -225,12 +225,20 @@
     </div>
     <div class="stream-stat">
       <div class="value mono" id="ecgBytes">0</div>
-      <div class="label">raw bytes / s</div>
+      <div class="label">ECG raw bytes / s</div>
+    </div>
+    <div class="stream-stat">
+      <div class="value mono" id="imuPackets">0</div>
+      <div class="label">IMU9 packets received</div>
+    </div>
+    <div class="stream-stat">
+      <div class="value mono" id="imuBytes">0</div>
+      <div class="label">IMU9 raw bytes / s</div>
     </div>
     <div class="note">
-      <code>/Meas/Ecg/200/mV</code> packets are arriving over GSP but not
-      decoded into a waveform yet — the payload is SBEM-encoded. See the
-      README for where the decoder should come from.
+      Both <code>/Meas/Ecg/200/mV</code> and <code>/Meas/IMU9/52</code>
+      arrive over GSP but aren't decoded yet — the payload is
+      SBEM-encoded. See the README for where the decoder should come from.
     </div>
   </div>
 </main>
@@ -243,11 +251,15 @@
   const sdnnValue = document.getElementById('sdnnValue');
   const ecgPackets = document.getElementById('ecgPackets');
   const ecgBytes = document.getElementById('ecgBytes');
+  const imuPackets = document.getElementById('imuPackets');
+  const imuBytes = document.getElementById('imuBytes');
 
   const BACKEND_HOST = 'localhost:8000';
 
-  let packetCount = 0;
-  let byteCountThisSecond = 0;
+  let ecgPacketCount = 0;
+  let ecgByteCountThisSecond = 0;
+  let imuPacketCount = 0;
+  let imuByteCountThisSecond = 0;
 
   const hrChart = new Chart(document.getElementById('hrChart'), {
     type: 'line',
@@ -294,8 +306,10 @@
   }
 
   setInterval(() => {
-    ecgBytes.textContent = byteCountThisSecond;
-    byteCountThisSecond = 0;
+    ecgBytes.textContent = ecgByteCountThisSecond;
+    ecgByteCountThisSecond = 0;
+    imuBytes.textContent = imuByteCountThisSecond;
+    imuByteCountThisSecond = 0;
   }, 1000);
 
   async function fetchStatus() {
@@ -327,9 +341,13 @@
       if (msg.type === 'hr') {
         pushHR(msg.bpm, msg.sdnn_ms);
       } else if (msg.type === 'ecg_raw') {
-        packetCount += 1;
-        byteCountThisSecond += msg.num_bytes;
-        ecgPackets.textContent = packetCount;
+        ecgPacketCount += 1;
+        ecgByteCountThisSecond += msg.num_bytes;
+        ecgPackets.textContent = ecgPacketCount;
+      } else if (msg.type === 'imu_raw') {
+        imuPacketCount += 1;
+        imuByteCountThisSecond += msg.num_bytes;
+        imuPackets.textContent = imuPacketCount;
       }
     };
   }

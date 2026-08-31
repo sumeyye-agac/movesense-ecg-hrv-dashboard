@@ -5,9 +5,11 @@ Two data paths, handled independently:
 
 - Heart rate over the standard Bluetooth Heart Rate Service (0x180D /
   0x2A37). Arrives pre-decoded, no vendor protocol involved.
-- ECG over Movesense's own GSP protocol (spec:
-  movesense.com/docs/esw/gatt_sensordata_protocol). GSP hands back the
-  measurement as raw SBEM-encoded bytes. SBEM decoding is not
+- ECG and IMU9 (accelerometer + gyroscope + magnetometer) over
+  Movesense's own GSP protocol (spec:
+  movesense.com/docs/esw/gatt_sensordata_protocol). Both ride the same
+  GSP notify characteristic, distinguished by reference code. GSP hands
+  back each measurement as raw SBEM-encoded bytes. SBEM decoding is not
   implemented here - see the project README for where to pull that
   from (Movesense's own python-datalogger-tool on Bitbucket, or the
   sensein/movesense-py fork of it).
@@ -31,7 +33,12 @@ CMD_HELLO = 0
 CMD_SUBSCRIBE = 1
 CMD_UNSUBSCRIBE = 2
 
-ECG_SUBSCRIBE_REF = 42  # arbitrary 8-bit "reference code", must stay unique until unsubscribed
+# Arbitrary 8-bit "reference code" per subscription, must stay unique
+# until unsubscribed - this is how responses on the shared GSP notify
+# characteristic get routed back to the right callback.
+ECG_SUBSCRIBE_REF = 42
+IMU_SUBSCRIBE_REF = 43
+IMU_SAMPLE_RATE_HZ = 52  # one of Movesense's fixed rates: 13/26/52/104/208/416/833/1666
 
 
 class MovesenseBLE:
@@ -40,11 +47,13 @@ class MovesenseBLE:
         address: str,
         on_hr: Optional[Callable[[int, list], None]] = None,
         on_ecg_raw: Optional[Callable[[int, bytes], None]] = None,
+        on_imu_raw: Optional[Callable[[int, bytes], None]] = None,
     ):
         self.address = address
         self.client: Optional[BleakClient] = None
         self.on_hr = on_hr
         self.on_ecg_raw = on_ecg_raw
+        self.on_imu_raw = on_imu_raw
         self.gsp_available = False
 
     @staticmethod
@@ -67,6 +76,7 @@ class MovesenseBLE:
             await self.client.start_notify(GSP_NOTIFY_UUID, self._handle_gsp)
             await self._gsp_send(CMD_HELLO, ref=1, data=b"")
             await self._gsp_subscribe("/Meas/Ecg/200/mV", ref=ECG_SUBSCRIBE_REF)
+            await self._gsp_subscribe(f"/Meas/IMU9/{IMU_SAMPLE_RATE_HZ}", ref=IMU_SUBSCRIBE_REF)
             self.gsp_available = True
         except Exception as e:
             print(f"GSP not available on this sensor (likely firmware < 2.3.0): {e}")
@@ -74,10 +84,11 @@ class MovesenseBLE:
     async def disconnect(self):
         if self.client and self.client.is_connected:
             if self.gsp_available:
-                try:
-                    await self._gsp_send(CMD_UNSUBSCRIBE, ref=ECG_SUBSCRIBE_REF, data=b"")
-                except Exception:
-                    pass
+                for ref in (ECG_SUBSCRIBE_REF, IMU_SUBSCRIBE_REF):
+                    try:
+                        await self._gsp_send(CMD_UNSUBSCRIBE, ref=ref, data=b"")
+                    except Exception:
+                        pass
             await self.client.disconnect()
 
     @property
@@ -135,5 +146,7 @@ class MovesenseBLE:
         if response_code in (0x02, 0x03):
             # DATA / DATA_PART2: payload is SBEM-encoded, not decoded here.
             payload = bytes(data[2:])
-            if self.on_ecg_raw:
+            if ref == ECG_SUBSCRIBE_REF and self.on_ecg_raw:
                 self.on_ecg_raw(ref, payload)
+            elif ref == IMU_SUBSCRIBE_REF and self.on_imu_raw:
+                self.on_imu_raw(ref, payload)

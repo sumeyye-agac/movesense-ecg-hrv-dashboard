@@ -1,23 +1,24 @@
 # Movesense Live Dashboard
 
-Real-time heart-rate and ECG streaming from a Movesense MD sensor to a
-browser dashboard, over Bluetooth Low Energy — no phone app in the middle.
+Real-time heart-rate, ECG, and IMU streaming from a Movesense MD sensor
+to a browser dashboard, over Bluetooth Low Energy — no phone app in the
+middle.
 
 ## Demo
 
-A pipeline that reads live ECG and heart-rate data off a Movesense
-medical sensor over Bluetooth Low Energy, decodes it against the
-vendor's own GATT protocol spec, computes a live HRV estimate, and
+A pipeline that reads live ECG, IMU9, and heart-rate data off a
+Movesense medical sensor over Bluetooth Low Energy, decodes it against
+the vendor's own GATT protocol spec, computes a live HRV estimate, and
 streams the result to a browser dashboard in real time.
 
 ## Requirements
 
 - A Movesense MD sensor. Heart rate and HRV work on any firmware, since
-  they come over the standard BLE Heart Rate Service. The ECG path needs
-  **firmware 2.3.0 or later** (2.3.1 for the MD/medical variant), which is
-  where GSP became part of the default firmware — on older firmware the
-  backend logs that GSP is unavailable and keeps streaming heart rate.
-  Check/update via the Movesense Showcase app.
+  they come over the standard BLE Heart Rate Service. The ECG and IMU9
+  paths need **firmware 2.3.0 or later** (2.3.1 for the MD/medical
+  variant), which is where GSP became part of the default firmware — on
+  older firmware the backend logs that GSP is unavailable and keeps
+  streaming heart rate. Check/update via the Movesense Showcase app.
 - Python 3.10+, and a machine with BLE (macOS, Linux, or Windows).
 
 ## Architecture
@@ -37,15 +38,16 @@ Two data paths run side by side:
   SDNN (standard deviation of RR intervals) as a rough HRV indicator.
   This is a simple, unfiltered SDNN — no ectopic-beat correction — so
   treat it as a live signal, not a clinical HRV number. Fully working.
-- **ECG** — via Movesense's own GSP ("GATT SensorData Protocol"), built
+- **ECG and IMU9** (accelerometer + gyroscope + magnetometer) — via
+  Movesense's own GSP ("GATT SensorData Protocol"), built
   for exactly this case: a laptop or Pi that can't run their mobile SDK.
   The handshake and subscription here are implemented against Movesense's
   published spec. The payload itself comes back as **SBEM**, Suunto's
   binary measurement format. SBEM isn't described in Movesense's written
   docs, but it isn't undocumented either — Movesense ships an official
   Python client that decodes it (see References). Decoding isn't wired
-  up in this repo yet; the dashboard currently just shows that ECG
-  packets are arriving (count, byte rate).
+  up in this repo yet; the dashboard currently just shows that packets
+  are arriving on each path (count, byte rate).
 
 ## Setup
 
