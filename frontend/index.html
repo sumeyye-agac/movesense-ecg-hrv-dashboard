@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Movesense Live</title>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0A0E12;
+    --panel: #12181F;
+    --panel-border: #1D242C;
+    --grid: #1A2129;
+    --accent: #4CE0B3;
+    --accent-dim: #2E7A64;
+    --warn: #FFB84D;
+    --text: #E8EDF2;
+    --text-dim: #6B7785;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  .mono {
+    font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 1040px;
+    margin: 0 auto 28px auto;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+
+  header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: 0.2px;
+  }
+
+  header .device {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4A5560;
+    transition: background 0.3s;
+  }
+
+  .dot.live {
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+  }
+
+  main {
+    max-width: 1040px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 20px;
+  }
+
+  @media (max-width: 640px) {
+    main { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+
+  .bpm-value {
+    font-size: 56px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--accent);
+  }
+
+  .bpm-label {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 10px;
+  }
+
+  .bpm-unit {
+    font-size: 16px;
+    color: var(--text-dim);
+    margin-left: 6px;
+  }
+
+  .side-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .hrv-value {
+    font-size: 40px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--warn);
+  }
+
+  .hrv-unit {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin-left: 6px;
+  }
+
+  .chart-panel {
+    grid-column: 2;
+  }
+
+  @media (max-width: 640px) {
+    .chart-panel { grid-column: 1; }
+  }
+
+  .chart-panel h2, .stream-panel h2 {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-dim);
+    margin: 0 0 14px 0;
+    text-transform: none;
+  }
+
+  canvas { max-height: 220px; }
+
+  .stream-panel {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    align-items: baseline;
+  }
+
+  .stream-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .stream-stat .value {
+    font-size: 22px;
+    color: var(--text);
+  }
+
+  .stream-stat .label {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  .note {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.6;
+    max-width: 640px;
+  }
+
+  .note a { color: var(--accent-dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Movesense Live</h1>
+    <div class="device" id="deviceAddress">connecting to backend&hellip;</div>
+  </div>
+  <div class="status">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">offline</span>
+  </div>
+</header>
+
+<main>
+  <div class="side-stack">
+    <div class="panel">
+      <div class="bpm-value mono"><span id="bpmValue">--</span><span class="bpm-unit">bpm</span></div>
+      <div class="bpm-label">Heart rate</div>
+    </div>
+
+    <div class="panel">
+      <div class="hrv-value mono"><span id="sdnnValue">--</span><span class="hrv-unit">ms</span></div>
+      <div class="bpm-label">HRV (SDNN, last 60 beats)</div>
+    </div>
+  </div>
+
+  <div class="panel chart-panel">
+    <h2>Heart rate — last 60 s</h2>
+    <canvas id="hrChart"></canvas>
+  </div>
+
+  <div class="panel stream-panel">
+    <div class="stream-stat">
+      <div class="value mono" id="ecgPackets">0</div>
+      <div class="label">ECG packets received</div>
+    </div>
+    <div class="stream-stat">
+      <div class="value mono" id="ecgBytes">0</div>
+      <div class="label">raw bytes / s</div>
+    </div>
+    <div class="note">
+      <code>/Meas/Ecg/200/mV</code> packets are arriving over GSP but not
+      decoded into a waveform yet — the payload is SBEM-encoded. See the
+      README for where the decoder should come from.
+    </div>
+  </div>
+</main>
+
+<script>
+  const statusDot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
+  const deviceAddress = document.getElementById('deviceAddress');
+  const bpmValue = document.getElementById('bpmValue');
+  const sdnnValue = document.getElementById('sdnnValue');
+  const ecgPackets = document.getElementById('ecgPackets');
+  const ecgBytes = document.getElementById('ecgBytes');
+
+  const BACKEND_HOST = 'localhost:8000';
+
+  let packetCount = 0;
+  let byteCountThisSecond = 0;
+
+  const hrChart = new Chart(document.getElementById('hrChart'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        data: [],
+        borderColor: '#4CE0B3',
+        backgroundColor: 'rgba(76, 224, 179, 0.08)',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.3,
+        fill: true,
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { display: false },
+        y: {
+          grid: { color: '#1A2129' },
+          ticks: { color: '#6B7785', font: { family: 'JetBrains Mono' } },
+        }
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+
+  function pushHR(bpm, sdnnMs) {
+    bpmValue.textContent = bpm;
+    sdnnValue.textContent = sdnnMs != null ? sdnnMs : '--';
+    const now = new Date();
+    const label = now.toLocaleTimeString();
+    const data = hrChart.data;
+    data.labels.push(label);
+    data.datasets[0].data.push(bpm);
+    if (data.labels.length > 60) {
+      data.labels.shift();
+      data.datasets[0].data.shift();
+    }
+    hrChart.update();
+  }
+
+  setInterval(() => {
+    ecgBytes.textContent = byteCountThisSecond;
+    byteCountThisSecond = 0;
+  }, 1000);
+
+  async function fetchStatus() {
+    try {
+      const res = await fetch(`http://${BACKEND_HOST}/status`);
+      const data = await res.json();
+      deviceAddress.textContent = data.address ? data.address : 'no MOVESENSE_ADDRESS set';
+    } catch {
+      deviceAddress.textContent = 'backend unreachable';
+    }
+  }
+
+  function connect() {
+    const ws = new WebSocket(`ws://${BACKEND_HOST}/ws`);
+
+    ws.onopen = () => {
+      statusDot.classList.add('live');
+      statusText.textContent = 'live';
+    };
+
+    ws.onclose = () => {
+      statusDot.classList.remove('live');
+      statusText.textContent = 'reconnecting…';
+      setTimeout(connect, 2000);
+    };
+
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'hr') {
+        pushHR(msg.bpm, msg.sdnn_ms);
+      } else if (msg.type === 'ecg_raw') {
+        packetCount += 1;
+        byteCountThisSecond += msg.num_bytes;
+        ecgPackets.textContent = packetCount;
+      }
+    };
+  }
+
+  fetchStatus();
+  connect();
+</script>
+
+</body>
+</html>

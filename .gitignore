@@ -1,0 +1,11 @@
+# Local config (sensor address) - see backend/.env.example
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# macOS
+.DS_Store
