@@ -39,7 +39,7 @@ Two data paths run side by side:
 - **Heart rate + HRV** — via the standard Bluetooth Heart Rate Service
   (BLE SIG spec, service 0x180D / characteristic 0x2A37). Bpm arrives
   pre-decoded; when the sensor also includes RR-intervals (flags bit 4),
-  the backend keeps a rolling window of the last 60 and reports a live
+  the backend keeps a rolling window of the last 300 and reports a live
   SDNN (standard deviation of RR intervals) as a rough HRV indicator.
   This is a simple, unfiltered SDNN — no ectopic-beat correction — so
   treat it as a live signal, not a clinical HRV number. Fully working.

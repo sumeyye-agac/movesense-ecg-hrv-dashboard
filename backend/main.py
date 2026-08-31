@@ -29,7 +29,7 @@ main_loop: asyncio.AbstractEventLoop | None = None
 # Rolling window for a simple SDNN (HRV) estimate. This is standard
 # deviation of raw RR intervals with no artifact/ectopic-beat filtering,
 # so treat it as a rough live indicator, not a clinical HRV metric.
-RR_WINDOW_SIZE = 60
+RR_WINDOW_SIZE = 300
 SDNN_MIN_SAMPLES = 10
 rr_window: deque[float] = deque(maxlen=RR_WINDOW_SIZE)
 

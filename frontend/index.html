@@ -194,16 +194,16 @@
 
   <div class="panel">
     <div class="hrv-value mono"><span id="sdnnValue">--</span><span class="hrv-unit">ms</span></div>
-    <div class="bpm-label">HRV (SDNN, last 60 beats)</div>
+    <div class="bpm-label">HRV (SDNN, last 300 beats)</div>
   </div>
 
   <div class="panel chart-panel">
-    <h2>Heart rate — last 60 s</h2>
+    <h2>Heart rate — last 300 s</h2>
     <canvas id="hrChart"></canvas>
   </div>
 
   <div class="panel chart-panel">
-    <h2>HRV (SDNN) — last 60 beats</h2>
+    <h2>HRV (SDNN) — last 300 s</h2>
     <canvas id="hrvChart"></canvas>
   </div>
 
@@ -322,7 +322,7 @@
     const hrData = hrChart.data;
     hrData.labels.push(label);
     hrData.datasets[0].data.push(bpm);
-    if (hrData.labels.length > 60) {
+    if (hrData.labels.length > 300) {
       hrData.labels.shift();
       hrData.datasets[0].data.shift();
     }
@@ -333,7 +333,7 @@
     const hrvData = hrvChart.data;
     hrvData.labels.push(label);
     hrvData.datasets[0].data.push(sdnnMs);
-    if (hrvData.labels.length > 60) {
+    if (hrvData.labels.length > 300) {
       hrvData.labels.shift();
       hrvData.datasets[0].data.shift();
     }
