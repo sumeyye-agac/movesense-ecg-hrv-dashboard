@@ -60,18 +60,24 @@ def on_hr(bpm: int, rr_intervals_ms: list[float]):
         )
 
 
-def on_ecg_raw(ref: int, payload: bytes):
+def on_ecg(timestamp_ms: int, mv_samples: list[float]):
     if main_loop:
         asyncio.run_coroutine_threadsafe(
-            broadcast({"type": "ecg_raw", "ref": ref, "num_bytes": len(payload)}),
+            broadcast({"type": "ecg", "t": timestamp_ms, "mv": mv_samples}),
             main_loop,
         )
 
 
-def on_imu_raw(ref: int, payload: bytes):
+def on_imu(timestamp_ms: int, acc: list[tuple], gyro: list[tuple], magn: list[tuple]):
     if main_loop:
         asyncio.run_coroutine_threadsafe(
-            broadcast({"type": "imu_raw", "ref": ref, "num_bytes": len(payload)}),
+            broadcast({
+                "type": "imu",
+                "t": timestamp_ms,
+                "acc": acc,
+                "gyro": gyro,
+                "magn": magn,
+            }),
             main_loop,
         )
 
@@ -93,21 +99,21 @@ async def connection_loop():
     global ble_client
     while True:
         reconnect_event.clear()
-        ble_client = MovesenseBLE(
-            MOVESENSE_ADDRESS,
-            on_hr=on_hr,
-            on_ecg_raw=on_ecg_raw,
-            on_imu_raw=on_imu_raw,
-            on_disconnect=on_sensor_disconnect,
-        )
         connected_ok = False
         try:
+            ble_client = MovesenseBLE(
+                MOVESENSE_ADDRESS,
+                on_hr=on_hr,
+                on_ecg=on_ecg,
+                on_imu=on_imu,
+                on_disconnect=on_sensor_disconnect,
+            )
             await ble_client.connect()
             connected_ok = True
             print(f"Connected to Movesense sensor at {MOVESENSE_ADDRESS}")
             print(f"GSP (ECG) available: {ble_client.gsp_available}")
         except Exception as e:
-            print(f"Could not connect to Movesense sensor: {e}")
+            print(f"Could not connect to Movesense sensor: {e!r}")
             ble_client = None
 
         if connected_ok:

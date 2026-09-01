@@ -151,6 +151,14 @@
     margin-left: 6px;
   }
 
+  .full-width {
+    grid-column: 1 / -1;
+  }
+
+  .hidden-for-now {
+    display: none;
+  }
+
   .chart-panel h2, .stream-panel h2 {
     font-size: 12px;
     font-weight: 500;
@@ -212,47 +220,50 @@
 </header>
 
 <main>
-  <div class="panel">
+  <div class="panel full-width">
     <div class="bpm-value mono"><span id="bpmValue">--</span><span class="bpm-unit">bpm</span></div>
     <div class="bpm-label">Heart rate</div>
   </div>
 
-  <div class="panel">
+  <div class="panel hidden-for-now">
     <div class="hrv-value mono"><span id="sdnnValue">--</span><span class="hrv-unit">ms</span></div>
     <div class="bpm-label">HRV (SDNN, last 60 beats)</div>
   </div>
 
-  <div class="panel chart-panel">
+  <div class="panel chart-panel full-width">
     <h2>Heart rate — last 60 s</h2>
     <canvas id="hrChart"></canvas>
   </div>
 
-  <div class="panel chart-panel">
-    <h2>HRV (SDNN) — last 60 s</h2>
+  <div class="panel chart-panel hidden-for-now">
+    <h2>HRV (SDNN) — last 60 beats</h2>
     <canvas id="hrvChart"></canvas>
+  </div>
+
+  <div class="panel chart-panel full-width">
+    <h2>ECG — live waveform (mV)</h2>
+    <canvas id="ecgChart"></canvas>
+  </div>
+
+  <div class="panel chart-panel full-width">
+    <h2>Accelerometer — live (m/s²)</h2>
+    <canvas id="accChart"></canvas>
   </div>
 
   <div class="panel stream-panel">
     <div class="stream-stat">
       <div class="value mono" id="ecgPackets">0</div>
-      <div class="label">ECG packets received</div>
-    </div>
-    <div class="stream-stat">
-      <div class="value mono" id="ecgBytes">0</div>
-      <div class="label">ECG raw bytes / s</div>
+      <div class="label">ECG packets / s</div>
     </div>
     <div class="stream-stat">
       <div class="value mono" id="imuPackets">0</div>
-      <div class="label">IMU9 packets received</div>
-    </div>
-    <div class="stream-stat">
-      <div class="value mono" id="imuBytes">0</div>
-      <div class="label">IMU9 raw bytes / s</div>
+      <div class="label">IMU9 packets / s</div>
     </div>
     <div class="note">
-      Both <code>/Meas/Ecg/200/mV</code> and <code>/Meas/IMU9/52</code>
-      arrive over GSP but aren't decoded yet — the payload is
-      SBEM-encoded. See the README for where the decoder should come from.
+      Decoded and verified against physics: accelerometer magnitude at
+      rest reads ~9.8 m/s² (Earth's gravity), ECG uses Movesense's
+      published raw-LSB-to-mV conversion factor. See the README for how
+      this was reverse-engineered and checked.
     </div>
   </div>
 </main>
@@ -266,16 +277,12 @@
   const bpmValue = document.getElementById('bpmValue');
   const sdnnValue = document.getElementById('sdnnValue');
   const ecgPackets = document.getElementById('ecgPackets');
-  const ecgBytes = document.getElementById('ecgBytes');
   const imuPackets = document.getElementById('imuPackets');
-  const imuBytes = document.getElementById('imuBytes');
 
   const BACKEND_HOST = 'localhost:8000';
 
-  let ecgPacketCount = 0;
-  let ecgByteCountThisSecond = 0;
-  let imuPacketCount = 0;
-  let imuByteCountThisSecond = 0;
+  let ecgPacketsThisSecond = 0;
+  let imuPacketsThisSecond = 0;
   let lastMessageAt = null;
 
   const hrChart = new Chart(document.getElementById('hrChart'), {
@@ -341,6 +348,91 @@
     }
   });
 
+  const ecgChart = new Chart(document.getElementById('ecgChart'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [{
+        data: [],
+        borderColor: '#4CE0B3',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0,
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { display: true, ticks: { display: false }, grid: { color: '#1A2129' } },
+        y: {
+          grid: { color: '#1A2129' },
+          ticks: { color: '#6B7785', font: { family: 'JetBrains Mono' }, maxTicksLimit: 5 },
+        }
+      },
+      plugins: { legend: { display: false } }
+    }
+  });
+  const ECG_WINDOW = 125 * 4; // ~4 seconds at 125 Hz
+
+  const accChart = new Chart(document.getElementById('accChart'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        { label: 'x', data: [], borderColor: '#4CE0B3', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+        { label: 'y', data: [], borderColor: '#FFB84D', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+        { label: 'z', data: [], borderColor: '#8AB4F8', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+      ]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { display: true, ticks: { display: false }, grid: { color: '#1A2129' } },
+        y: {
+          suggestedMin: -12, suggestedMax: 12,
+          grid: { color: '#1A2129' },
+          ticks: { color: '#6B7785', font: { family: 'JetBrains Mono' }, maxTicksLimit: 5 },
+        }
+      },
+      plugins: {
+        legend: { display: true, position: 'top', labels: { color: '#6B7785', usePointStyle: true, pointStyle: 'line' } }
+      }
+    }
+  });
+  const ACC_WINDOW = 52 * 4; // ~4 seconds at 52 Hz
+
+  function pushEcg(mvSamples) {
+    const data = ecgChart.data;
+    for (const v of mvSamples) {
+      data.labels.push('');
+      data.datasets[0].data.push(v);
+    }
+    while (data.labels.length > ECG_WINDOW) {
+      data.labels.shift();
+      data.datasets[0].data.shift();
+    }
+    ecgChart.update();
+  }
+
+  function pushAcc(accSamples) {
+    const data = accChart.data;
+    for (const [x, y, z] of accSamples) {
+      data.labels.push('');
+      data.datasets[0].data.push(x);
+      data.datasets[1].data.push(y);
+      data.datasets[2].data.push(z);
+    }
+    while (data.labels.length > ACC_WINDOW) {
+      data.labels.shift();
+      data.datasets.forEach(ds => ds.data.shift());
+    }
+    accChart.update();
+  }
+
   function pushHR(bpm, sdnnMs) {
     bpmValue.textContent = bpm;
     sdnnValue.textContent = sdnnMs != null ? sdnnMs : '--';
@@ -369,10 +461,10 @@
   }
 
   setInterval(() => {
-    ecgBytes.textContent = ecgByteCountThisSecond;
-    ecgByteCountThisSecond = 0;
-    imuBytes.textContent = imuByteCountThisSecond;
-    imuByteCountThisSecond = 0;
+    ecgPackets.textContent = ecgPacketsThisSecond;
+    ecgPacketsThisSecond = 0;
+    imuPackets.textContent = imuPacketsThisSecond;
+    imuPacketsThisSecond = 0;
   }, 1000);
 
   setInterval(() => {
@@ -423,14 +515,12 @@
       lastMessageAt = Date.now();
       if (msg.type === 'hr') {
         pushHR(msg.bpm, msg.sdnn_ms);
-      } else if (msg.type === 'ecg_raw') {
-        ecgPacketCount += 1;
-        ecgByteCountThisSecond += msg.num_bytes;
-        ecgPackets.textContent = ecgPacketCount;
-      } else if (msg.type === 'imu_raw') {
-        imuPacketCount += 1;
-        imuByteCountThisSecond += msg.num_bytes;
-        imuPackets.textContent = imuPacketCount;
+      } else if (msg.type === 'ecg') {
+        ecgPacketsThisSecond += 1;
+        pushEcg(msg.mv);
+      } else if (msg.type === 'imu') {
+        imuPacketsThisSecond += 1;
+        pushAcc(msg.acc);
       }
     };
   }
