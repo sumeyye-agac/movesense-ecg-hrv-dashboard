@@ -25,6 +25,7 @@ MOVESENSE_ADDRESS = os.environ.get("MOVESENSE_ADDRESS")
 connected_clients: set[WebSocket] = set()
 ble_client: MovesenseBLE | None = None
 main_loop: asyncio.AbstractEventLoop | None = None
+reconnect_event: asyncio.Event | None = None
 
 # Rolling window for a simple SDNN (HRV) estimate. This is standard
 # deviation of raw RR intervals with no artifact/ectopic-beat filtering,
@@ -75,28 +76,65 @@ def on_imu_raw(ref: int, payload: bytes):
         )
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global ble_client, main_loop
-    main_loop = asyncio.get_running_loop()
+def on_sensor_disconnect():
+    # Runs on bleak's callback thread/loop - hop back onto the main loop
+    # to flag the reconnect loop rather than touching asyncio state directly.
+    if main_loop and reconnect_event:
+        main_loop.call_soon_threadsafe(reconnect_event.set)
 
-    if MOVESENSE_ADDRESS:
+
+async def connection_loop():
+    """Connects to the sensor and keeps reconnecting after unexpected drops.
+
+    A dropped BLE link (out of range, sensor sleeping, radio interference)
+    is normal, not exceptional - this loop just keeps retrying rather than
+    leaving the backend silently dead until someone restarts uvicorn.
+    """
+    global ble_client
+    while True:
+        reconnect_event.clear()
         ble_client = MovesenseBLE(
-            MOVESENSE_ADDRESS, on_hr=on_hr, on_ecg_raw=on_ecg_raw, on_imu_raw=on_imu_raw
+            MOVESENSE_ADDRESS,
+            on_hr=on_hr,
+            on_ecg_raw=on_ecg_raw,
+            on_imu_raw=on_imu_raw,
+            on_disconnect=on_sensor_disconnect,
         )
+        connected_ok = False
         try:
             await ble_client.connect()
+            connected_ok = True
             print(f"Connected to Movesense sensor at {MOVESENSE_ADDRESS}")
             print(f"GSP (ECG) available: {ble_client.gsp_available}")
         except Exception as e:
             print(f"Could not connect to Movesense sensor: {e}")
             ble_client = None
+
+        if connected_ok:
+            await reconnect_event.wait()
+            print("Sensor disconnected - reconnecting...")
+        else:
+            print("Retrying sensor connection in 5s...")
+            await asyncio.sleep(5)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global main_loop, reconnect_event
+    main_loop = asyncio.get_running_loop()
+    reconnect_event = asyncio.Event()
+
+    connection_task = None
+    if MOVESENSE_ADDRESS:
+        connection_task = asyncio.create_task(connection_loop())
     else:
         print("MOVESENSE_ADDRESS not set - run `python scan.py` to find your sensor,")
         print("then put it in a .env file. Server will run without a live sensor.")
 
     yield
 
+    if connection_task:
+        connection_task.cancel()
     if ble_client:
         await ble_client.disconnect()
 

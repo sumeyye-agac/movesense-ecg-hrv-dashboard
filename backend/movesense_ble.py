@@ -48,12 +48,14 @@ class MovesenseBLE:
         on_hr: Optional[Callable[[int, list], None]] = None,
         on_ecg_raw: Optional[Callable[[int, bytes], None]] = None,
         on_imu_raw: Optional[Callable[[int, bytes], None]] = None,
+        on_disconnect: Optional[Callable[[], None]] = None,
     ):
         self.address = address
         self.client: Optional[BleakClient] = None
         self.on_hr = on_hr
         self.on_ecg_raw = on_ecg_raw
         self.on_imu_raw = on_imu_raw
+        self.on_disconnect = on_disconnect
         self.gsp_available = False
 
     @staticmethod
@@ -63,7 +65,10 @@ class MovesenseBLE:
         return [d for d in devices if d.name and name_hint.lower() in d.name.lower()]
 
     async def connect(self):
-        self.client = BleakClient(self.address)
+        # disconnected_callback fires on an *unexpected* drop (out of range,
+        # radio interference, sensor powering off) - not on our own
+        # disconnect() calls below.
+        self.client = BleakClient(self.address, disconnected_callback=self._handle_unexpected_disconnect)
         await self.client.connect()
 
         # 1) Standard Heart Rate Service - works immediately, no handshake needed
@@ -80,6 +85,11 @@ class MovesenseBLE:
             self.gsp_available = True
         except Exception as e:
             print(f"GSP not available on this sensor (likely firmware < 2.3.0): {e}")
+
+    def _handle_unexpected_disconnect(self, _client):
+        print("Sensor connection dropped unexpectedly")
+        if self.on_disconnect:
+            self.on_disconnect()
 
     async def disconnect(self):
         if self.client and self.client.is_connected:
