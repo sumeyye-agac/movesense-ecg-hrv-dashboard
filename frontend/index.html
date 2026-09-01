@@ -15,6 +15,8 @@
     --accent: #4CE0B3;
     --accent-dim: #2E7A64;
     --warn: #FFB84D;
+    --info: #8AB4F8;
+    --ok: #B4E197;
     --text: #E8EDF2;
     --text-dim: #6B7785;
   }
@@ -151,6 +153,35 @@
     margin-left: 6px;
   }
 
+  .value-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+
+  @media (max-width: 640px) {
+    .value-row { grid-template-columns: 1fr; }
+  }
+
+  .metric-value {
+    font-size: 40px;
+    font-weight: 600;
+    line-height: 1;
+  }
+
+  .metric-unit {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin-left: 6px;
+  }
+
+  .metric-label {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 10px;
+  }
+
   .full-width {
     grid-column: 1 / -1;
   }
@@ -220,24 +251,21 @@
 </header>
 
 <main>
-  <div class="panel full-width">
-    <div class="bpm-value mono"><span id="bpmValue">--</span><span class="bpm-unit">bpm</span></div>
-    <div class="bpm-label">Heart rate</div>
-  </div>
+  <div class="value-row">
+    <div class="panel">
+      <div class="metric-value mono" style="color: var(--accent);"><span id="bpmValue">--</span><span class="metric-unit">bpm</span></div>
+      <div class="metric-label">Heart rate</div>
+    </div>
 
-  <div class="panel hidden-for-now">
-    <div class="hrv-value mono"><span id="sdnnValue">--</span><span class="hrv-unit">ms</span></div>
-    <div class="bpm-label">HRV (SDNN, last 60 beats)</div>
-  </div>
+    <div class="panel">
+      <div class="metric-value mono" style="color: var(--warn);"><span id="sdnnValue">--</span><span class="metric-unit">ms</span></div>
+      <div class="metric-label">HRV (SDNN)</div>
+    </div>
 
-  <div class="panel chart-panel full-width">
-    <h2>Heart rate — last 60 s</h2>
-    <canvas id="hrChart"></canvas>
-  </div>
-
-  <div class="panel chart-panel hidden-for-now">
-    <h2>HRV (SDNN) — last 60 beats</h2>
-    <canvas id="hrvChart"></canvas>
+    <div class="panel">
+      <div class="metric-value mono" style="color: var(--info);"><span id="tempValue">--</span><span class="metric-unit">°C</span></div>
+      <div class="metric-label">Temperature</div>
+    </div>
   </div>
 
   <div class="panel chart-panel full-width">
@@ -276,6 +304,7 @@
   const lastUpdateEl = document.getElementById('lastUpdate');
   const bpmValue = document.getElementById('bpmValue');
   const sdnnValue = document.getElementById('sdnnValue');
+  const tempValue = document.getElementById('tempValue');
   const ecgPackets = document.getElementById('ecgPackets');
   const imuPackets = document.getElementById('imuPackets');
 
@@ -284,69 +313,6 @@
   let ecgPacketsThisSecond = 0;
   let imuPacketsThisSecond = 0;
   let lastMessageAt = null;
-
-  const hrChart = new Chart(document.getElementById('hrChart'), {
-    type: 'line',
-    data: {
-      labels: [],
-      datasets: [{
-        data: [],
-        borderColor: '#4CE0B3',
-        backgroundColor: 'rgba(76, 224, 179, 0.08)',
-        borderWidth: 2,
-        pointRadius: 0,
-        tension: 0.3,
-        fill: true,
-      }]
-    },
-    options: {
-      animation: false,
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        x: { display: true, ticks: { display: false }, grid: { color: '#1A2129' } },
-        y: {
-          suggestedMin: 40,
-          suggestedMax: 160,
-          grid: { color: '#1A2129' },
-          ticks: { color: '#6B7785', font: { family: 'JetBrains Mono' }, maxTicksLimit: 5 },
-        }
-      },
-      plugins: { legend: { display: false } }
-    }
-  });
-
-  const hrvChart = new Chart(document.getElementById('hrvChart'), {
-    type: 'line',
-    data: {
-      labels: [],
-      datasets: [{
-        data: [],
-        borderColor: '#FFB84D',
-        backgroundColor: 'rgba(255, 184, 77, 0.08)',
-        borderWidth: 2,
-        pointRadius: 0,
-        tension: 0.3,
-        fill: true,
-        spanGaps: false,
-      }]
-    },
-    options: {
-      animation: false,
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        x: { display: true, ticks: { display: false }, grid: { color: '#1A2129' } },
-        y: {
-          suggestedMin: 0,
-          suggestedMax: 100,
-          grid: { color: '#1A2129' },
-          ticks: { color: '#6B7785', font: { family: 'JetBrains Mono' }, maxTicksLimit: 5 },
-        }
-      },
-      plugins: { legend: { display: false } }
-    }
-  });
 
   const ecgChart = new Chart(document.getElementById('ecgChart'), {
     type: 'line',
@@ -436,28 +402,6 @@
   function pushHR(bpm, sdnnMs) {
     bpmValue.textContent = bpm;
     sdnnValue.textContent = sdnnMs != null ? sdnnMs : '--';
-    const now = new Date();
-    const label = now.toLocaleTimeString();
-
-    const hrData = hrChart.data;
-    hrData.labels.push(label);
-    hrData.datasets[0].data.push(bpm);
-    if (hrData.labels.length > 60) {
-      hrData.labels.shift();
-      hrData.datasets[0].data.shift();
-    }
-    hrChart.update();
-
-    // sdnnMs is null until enough RR-intervals have accumulated - pushing
-    // null leaves a gap in the line instead of drawing a misleading 0.
-    const hrvData = hrvChart.data;
-    hrvData.labels.push(label);
-    hrvData.datasets[0].data.push(sdnnMs);
-    if (hrvData.labels.length > 60) {
-      hrvData.labels.shift();
-      hrvData.datasets[0].data.shift();
-    }
-    hrvChart.update();
   }
 
   setInterval(() => {
@@ -521,6 +465,8 @@
       } else if (msg.type === 'imu') {
         imuPacketsThisSecond += 1;
         pushAcc(msg.acc);
+      } else if (msg.type === 'temp') {
+        tempValue.textContent = msg.celsius;
       }
     };
   }

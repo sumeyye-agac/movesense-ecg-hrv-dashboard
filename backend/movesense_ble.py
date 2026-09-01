@@ -50,6 +50,7 @@ CMD_UNSUBSCRIBE = 2
 # characteristic get routed back to the right callback.
 ECG_SUBSCRIBE_REF = 42
 IMU_SUBSCRIBE_REF = 43
+TEMP_SUBSCRIBE_REF = 44
 IMU_SAMPLE_RATE_HZ = 52   # one of Movesense's fixed rates: 13/26/52/104/208/416/833/1666
 ECG_SAMPLE_RATE_HZ = 125  # confirmed valid for this sensor via /Meas/ECG/Info's AvailableSampleRates
 
@@ -85,6 +86,18 @@ def _decode_imu9(payload: bytes):
     return timestamp, acc, gyro, magn
 
 
+def _decode_temp(payload: bytes) -> float:
+    """Wire order is [float32 Kelvin][uint32 timestamp] - the *reverse* of
+    the Whiteboard schema's field listing order (Timestamp, Measurement),
+    and also reversed from ECG/IMU's timestamp-first layout. Confirmed on
+    real hardware: this ordering gives ~33.8 C for a chest-worn sensor
+    (plausible skin-adjacent temp); the timestamp-first reading gives 0 K
+    (absolute zero, impossible), which is how the swap was caught.
+    """
+    kelvin = struct.unpack_from("<f", payload, 0)[0]
+    return kelvin - 273.15
+
+
 class MovesenseBLE:
     def __init__(
         self,
@@ -92,6 +105,7 @@ class MovesenseBLE:
         on_hr: Optional[Callable[[int, list], None]] = None,
         on_ecg: Optional[Callable[[int, list], None]] = None,
         on_imu: Optional[Callable[[int, list, list, list], None]] = None,
+        on_temp: Optional[Callable[[float], None]] = None,
         on_disconnect: Optional[Callable[[], None]] = None,
     ):
         self.address = address
@@ -99,6 +113,7 @@ class MovesenseBLE:
         self.on_hr = on_hr
         self.on_ecg = on_ecg
         self.on_imu = on_imu
+        self.on_temp = on_temp
         self.on_disconnect = on_disconnect
         self.gsp_available = False
 
@@ -125,8 +140,14 @@ class MovesenseBLE:
             await self.client.start_notify(GSP_NOTIFY_UUID, self._handle_gsp)
             await self._gsp_send(CMD_HELLO, ref=1, data=b"")
             await asyncio.sleep(0.3)
+            # Subscribe the light, low-rate paths first, before ECG/IMU's
+            # continuous high-rate streams start competing for the
+            # notification channel - if sent last, their acks sometimes
+            # never arrive at all (observed this with ref=44 previously).
+            await self._gsp_subscribe("/Meas/Temp", ref=TEMP_SUBSCRIBE_REF)
+            await asyncio.sleep(0.5)
             await self._gsp_subscribe(f"/Meas/ECG/{ECG_SAMPLE_RATE_HZ}/mV", ref=ECG_SUBSCRIBE_REF)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.5)
             await self._gsp_subscribe(f"/Meas/IMU9/{IMU_SAMPLE_RATE_HZ}", ref=IMU_SUBSCRIBE_REF)
             self.gsp_available = True
         except Exception as e:
@@ -140,7 +161,7 @@ class MovesenseBLE:
     async def disconnect(self):
         if self.client and self.client.is_connected:
             if self.gsp_available:
-                for ref in (ECG_SUBSCRIBE_REF, IMU_SUBSCRIBE_REF):
+                for ref in (ECG_SUBSCRIBE_REF, IMU_SUBSCRIBE_REF, TEMP_SUBSCRIBE_REF):
                     try:
                         await self._gsp_send(CMD_UNSUBSCRIBE, ref=ref, data=b"")
                     except Exception:
@@ -213,6 +234,10 @@ class MovesenseBLE:
                     timestamp, acc, gyro, magn = _decode_imu9(payload)
                     if self.on_imu:
                         self.on_imu(timestamp, acc, gyro, magn)
-            except struct.error as e:
+                elif ref == TEMP_SUBSCRIBE_REF:
+                    celsius = _decode_temp(payload)
+                    if self.on_temp:
+                        self.on_temp(celsius)
+            except (struct.error, IndexError) as e:
                 print(f"[GSP] failed to decode payload for ref={ref}: {e}")
 

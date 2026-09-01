@@ -82,6 +82,14 @@ def on_imu(timestamp_ms: int, acc: list[tuple], gyro: list[tuple], magn: list[tu
         )
 
 
+def on_temp(celsius: float):
+    if main_loop:
+        asyncio.run_coroutine_threadsafe(
+            broadcast({"type": "temp", "celsius": round(celsius, 1)}),
+            main_loop,
+        )
+
+
 def on_sensor_disconnect():
     # Runs on bleak's callback thread/loop - hop back onto the main loop
     # to flag the reconnect loop rather than touching asyncio state directly.
@@ -106,6 +114,7 @@ async def connection_loop():
                 on_hr=on_hr,
                 on_ecg=on_ecg,
                 on_imu=on_imu,
+                on_temp=on_temp,
                 on_disconnect=on_sensor_disconnect,
             )
             await ble_client.connect()
