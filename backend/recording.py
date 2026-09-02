@@ -54,6 +54,19 @@ _WRAP_THRESHOLD = 2 ** 31
 
 ALL_STREAMS = ("ecg", "imu", "hr", "temp")
 
+# Buffers live in memory and export costs roughly another two copies of
+# them (the CSV text, then the ZIP), so an unbounded recording is an
+# out-of-memory crash that takes the whole capture with it. Two million
+# samples is about four hours of 125 Hz ECG, or an hour at 500 Hz. On
+# reaching it the recording stops accepting samples and says so, which is
+# recoverable; silently dying is not.
+MAX_SAMPLES_PER_STREAM = 2_000_000
+
+# A backward jump in the device clock bigger than this is a uint32 wrap.
+# Anything smaller but still substantial means the sensor restarted and
+# its clock went back to zero - a different problem needing a different fix.
+_CLOCK_RESTART_THRESHOLD_MS = 1_000
+
 # Time columns are identical across every CSV so one loader can read them
 # all. t_device_ms is left empty where the stream has no device clock.
 _TIME_COLUMNS = ["t_s", "t_device_ms", "t_unix", "t_recv_unix"]
@@ -96,16 +109,25 @@ class Recorder:
         self._wrap_offset = 0
         self._last_raw_device_ms = None
 
-        # Raw packets: expanded into rows at export time.
-        self._ecg: list[tuple] = []   # (device_ms, recv_unix, [mv, ...])
-        self._imu: list[tuple] = []   # (device_ms, recv_unix, acc, gyro, magn)
-        self._temp: list[tuple] = []  # (device_ms, recv_unix, celsius)
+        # Raw packets: expanded into rows at export time. t_unix is resolved
+        # here at capture rather than at export, because a sensor reboot
+        # re-anchors the clock and recomputing an old packet against a newer
+        # anchor would silently redate everything recorded before it.
+        self._ecg: list[tuple] = []   # (device_ms, t_unix, recv_unix, [mv, ...])
+        self._imu: list[tuple] = []   # (device_ms, t_unix, recv_unix, acc, gyro, magn)
+        self._temp: list[tuple] = []  # (device_ms, t_unix, recv_unix, celsius)
         self._hr: list[tuple] = []    # (recv_unix, bpm, sdnn_ms, [rr_ms, ...])
 
+        # Running totals. status() is polled once a second during a
+        # recording; re-summing every buffered packet each time turns a
+        # status poll into an O(recording length) walk.
+        self._ecg_samples = 0
+        self._imu_samples = 0
+
         self._gaps: list[dict] = []
-        self._anomalies = {"ecg": 0, "imu": 0}
-        self._last_packet = {}  # stream -> (device_ms, sample_count)
-        self._last_device_row = None  # (t_unix, recv_unix) for drift at stop
+        self._clock_restarts = 0
+        self._truncated: set[str] = set()
+        self._last_device_row = None  # (device_ms, recv_unix) for drift at stop
 
     # --- lifecycle -----------------------------------------------------
 
@@ -152,44 +174,58 @@ class Recorder:
 
     def note_gap(self, reason: str):
         """Record that the data stream was interrupted (e.g. BLE dropped)."""
-        if self._active:
-            self._gaps.append({"unix": time.time(), "reason": reason})
+        with self._lock:
+            if self._active:
+                self._gaps.append({"unix": time.time(), "reason": reason})
 
     def get_finished(self, recording_id: str):
         return self._finished.get(recording_id)
 
     # --- clock ---------------------------------------------------------
 
-    def _unwrap(self, raw_device_ms: int) -> int:
-        if self._last_raw_device_ms is not None:
-            if raw_device_ms < self._last_raw_device_ms - _WRAP_THRESHOLD:
-                self._wrap_offset += _UINT32
-        self._last_raw_device_ms = raw_device_ms
-        return raw_device_ms + self._wrap_offset
+    def _device_time(self, raw_device_ms: int, recv_unix: float) -> int:
+        """Turn a raw packet timestamp into a continuous device-clock value.
 
-    def _anchor(self, device_ms: int, recv_unix: float):
+        Two discontinuities have to be told apart. The clock is a uint32 of
+        milliseconds, so it wraps every ~49.7 days of uptime and jumps back
+        by nearly 2^32; that is recoverable by adding the wrap. But if the
+        sensor loses power and reconnects, its clock restarts near zero -
+        a small backward jump. Treating that as a wrap would leave every
+        later sample dated an hour before the recording began, quietly and
+        with no error. So re-anchor instead, keeping the timeline monotonic
+        and noting it happened.
+        """
+        previous = self._last_raw_device_ms
+        if previous is not None:
+            if raw_device_ms < previous - _WRAP_THRESHOLD:
+                self._wrap_offset += _UINT32
+            elif raw_device_ms < previous - _CLOCK_RESTART_THRESHOLD_MS:
+                self._clock_restarts += 1
+                self._gaps.append({
+                    "unix": recv_unix,
+                    "reason": "device clock restarted - the sensor appears to have "
+                              "rebooted; timestamps were re-anchored here",
+                })
+                self._wrap_offset = 0
+                self._anchor_unix = None  # forces a fresh anchor below
+
+        self._last_raw_device_ms = raw_device_ms
+        device_ms = raw_device_ms + self._wrap_offset
+
         if self._anchor_unix is None:
             self._anchor_unix = recv_unix
             self._anchor_device_ms = device_ms
+        return device_ms
 
     def _to_unix(self, device_ms: float) -> float:
         return self._anchor_unix + (device_ms - self._anchor_device_ms) / 1000.0
 
-    def _check_contiguous(self, stream: str, device_ms: int, count: int, rate_hz: int):
-        """Flag packets that don't butt up against the previous one.
-
-        This doubles as a check on the assumption that a packet's
-        timestamp belongs to its *first* sample: if it does, and no
-        packets were dropped, consecutive timestamps differ by exactly
-        count / rate.
-        """
-        prev = self._last_packet.get(stream)
-        if prev is not None and rate_hz:
-            prev_ms, prev_count = prev
-            expected = prev_ms + prev_count * 1000.0 / rate_hz
-            if abs(device_ms - expected) > 500.0 / rate_hz:  # half a sample
-                self._anomalies[stream] += 1
-        self._last_packet[stream] = (device_ms, count)
+    def _over_budget(self, stream: str, buffered: int) -> bool:
+        if buffered < MAX_SAMPLES_PER_STREAM:
+            return False
+        if stream not in self._truncated:
+            self._truncated.add(stream)
+        return True
 
     # --- capture -------------------------------------------------------
 
@@ -197,33 +233,38 @@ class Recorder:
         with self._lock:
             if not self._active or "ecg" not in self.streams:
                 return
-            device_ms = self._unwrap(packet_ts_ms)
-            self._anchor(device_ms, recv_unix)
-            self._check_contiguous("ecg", device_ms, len(mv_samples), self.ecg_hz)
-            self._ecg.append((device_ms, recv_unix, mv_samples))
-            self._last_device_row = (device_ms, recv_unix)
+            if self._over_budget("ecg", self._ecg_samples):
+                return
+            device_ms = self._device_time(packet_ts_ms, recv_unix)
+            self._ecg.append((device_ms, self._to_unix(device_ms), recv_unix, mv_samples))
+            self._ecg_samples += len(mv_samples)
+            self._last_device_row = (self._to_unix(device_ms), recv_unix)
 
     def record_imu(self, packet_ts_ms: int, acc, gyro, magn, recv_unix: float):
         with self._lock:
             if not self._active or "imu" not in self.streams:
                 return
-            device_ms = self._unwrap(packet_ts_ms)
-            self._anchor(device_ms, recv_unix)
-            self._check_contiguous("imu", device_ms, len(acc), self.imu_hz)
-            self._imu.append((device_ms, recv_unix, acc, gyro, magn))
-            self._last_device_row = (device_ms, recv_unix)
+            if self._over_budget("imu", self._imu_samples):
+                return
+            device_ms = self._device_time(packet_ts_ms, recv_unix)
+            self._imu.append((device_ms, self._to_unix(device_ms), recv_unix, acc, gyro, magn))
+            self._imu_samples += len(acc)
+            self._last_device_row = (self._to_unix(device_ms), recv_unix)
 
     def record_temp(self, packet_ts_ms: int, celsius: float, recv_unix: float):
         with self._lock:
             if not self._active or "temp" not in self.streams:
                 return
-            device_ms = self._unwrap(packet_ts_ms)
-            self._anchor(device_ms, recv_unix)
-            self._temp.append((device_ms, recv_unix, celsius))
+            if self._over_budget("temp", len(self._temp)):
+                return
+            device_ms = self._device_time(packet_ts_ms, recv_unix)
+            self._temp.append((device_ms, self._to_unix(device_ms), recv_unix, celsius))
 
     def record_hr(self, bpm: int, sdnn_ms, rr_intervals_ms: list, recv_unix: float):
         with self._lock:
             if not self._active or "hr" not in self.streams:
+                return
+            if self._over_budget("hr", len(self._hr)):
                 return
             self._hr.append((recv_unix, bpm, sdnn_ms, list(rr_intervals_ms)))
 
@@ -243,15 +284,48 @@ class Recorder:
     def _counts(self):
         counts = {}
         if "ecg" in self.streams:
-            counts["ecg"] = sum(len(p[2]) for p in self._ecg)
+            counts["ecg"] = self._ecg_samples
         if "imu" in self.streams:
-            counts["imu"] = sum(len(p[2]) for p in self._imu)
+            counts["imu"] = self._imu_samples
         if "temp" in self.streams:
             counts["temp"] = len(self._temp)
         if "hr" in self.streams:
             counts["hr"] = len(self._hr)
             counts["rr"] = sum(len(h[3]) for h in self._hr)
         return counts
+
+    def _dropped_packets(self, packets, nominal_hz):
+        """Count packets that don't butt up against their predecessor.
+
+        Deliberately measured against the median observed packet cadence
+        rather than the nominal rate: IMU9 subscribed at 52 Hz delivers
+        about 54, so a nominal yardstick would either flag every packet or
+        need a tolerance so wide it flags nothing.
+
+        A packet is contiguous when its timestamp equals the previous
+        one's plus that packet's own duration. This doubles as a check on
+        the decoder's premise that a timestamp belongs to a packet's
+        *first* sample - if it did not, nothing here would line up.
+        """
+        steps = self._sample_steps(packets, nominal_hz)
+        usable = [step for step in steps if step]
+        if len(packets) < 3 or not usable:
+            return 0
+        step = statistics.median(usable)
+        tolerance = step / 2
+
+        dropped = 0
+        for previous, current in zip(packets, packets[1:]):
+            expected = previous[0] + len(previous[3]) * step
+            if abs(current[0] - expected) > tolerance:
+                dropped += 1
+        return dropped
+
+    def _anomalies(self):
+        return {
+            "ecg": self._dropped_packets(self._ecg, self.ecg_hz),
+            "imu": self._dropped_packets(self._imu, self.imu_hz),
+        }
 
     def _drift_ms(self):
         """How far the device clock has slipped from the wall clock.
@@ -260,33 +334,47 @@ class Recorder:
         packet's actual arrival time. Includes a constant BLE latency
         offset, so read the trend, not the absolute value.
         """
-        if self._last_device_row is None or self._anchor_unix is None:
+        if self._last_device_row is None:
             return None
-        device_ms, recv_unix = self._last_device_row
-        return round((self._to_unix(device_ms) - recv_unix) * 1000.0, 2)
+        t_unix, recv_unix = self._last_device_row
+        return round((t_unix - recv_unix) * 1000.0, 2)
 
     def _summary(self):
         duration = self.stopped_unix - self.started_unix
+        counts = self._counts()
         warnings = []
-        if not self._counts():
+
+        if not any(counts.values()):
             warnings.append("No samples were captured at all.")
         for stream in ("ecg", "imu"):
-            if stream in self.streams and not self._counts().get(stream):
+            if stream in self.streams and not counts.get(stream):
                 warnings.append(
                     f"{stream.upper()} was selected but no packets arrived - "
                     f"the sample rate may not be supported by this sensor."
                 )
+        if self._truncated:
+            warnings.append(
+                f"Hit the {MAX_SAMPLES_PER_STREAM:,}-sample ceiling on "
+                f"{', '.join(sorted(s.upper() for s in self._truncated))}; those streams "
+                f"stop early. Record in shorter sessions to capture the whole thing."
+            )
+        if self._clock_restarts:
+            warnings.append(
+                f"The sensor's clock restarted {self._clock_restarts} time(s), so it "
+                f"probably rebooted mid-recording. Timestamps were re-anchored at each "
+                f"restart - t_unix stays monotonic but the gap across them is not exact."
+            )
         if self._gaps:
-            warnings.append(f"{len(self._gaps)} connection interruption(s) during recording.")
-        for stream, packets, asked in (("ECG", self._ecg, self.ecg_hz), ("IMU9", self._imu, self.imu_hz)):
+            warnings.append(f"{len(self._gaps)} interruption(s) during recording.")
+        for name, packets, asked in (("ECG", self._ecg, self.ecg_hz), ("IMU9", self._imu, self.imu_hz)):
             measured = self._measured_hz(packets, asked)
             if measured and asked and abs(measured - asked) / asked > 0.01:
                 warnings.append(
-                    f"{stream} was subscribed at {asked} Hz but the sensor delivered "
+                    f"{name} was subscribed at {asked} Hz but the sensor delivered "
                     f"{measured} Hz. Sample spacing follows the measured rate; "
                     f"meta.json records both."
                 )
-        for stream, n in self._anomalies.items():
+        for stream, n in self._anomalies().items():
             if n:
                 warnings.append(
                     f"{n} {stream.upper()} packet(s) did not follow on from the previous "
@@ -296,7 +384,7 @@ class Recorder:
             "recording_id": self.recording_id,
             "label": self.label,
             "duration_s": round(duration, 1),
-            "counts": self._counts(),
+            "counts": counts,
             "streams": list(self.streams),
             "ecg_hz": self.ecg_hz,
             "imu_hz": self.imu_hz,
@@ -311,8 +399,7 @@ class Recorder:
 
     # --- export --------------------------------------------------------
 
-    def _row_times(self, device_ms, recv_unix):
-        t_unix = self._to_unix(device_ms)
+    def _row_times(self, device_ms, t_unix, recv_unix):
         return [
             _fmt(t_unix - self.started_unix, 6),
             _fmt(device_ms, 3),
@@ -340,7 +427,7 @@ class Recorder:
 
         steps = []
         for index, packet in enumerate(packets):
-            count = len(packet[2])
+            count = len(packet[3])
             if index + 1 < len(packets) and count:
                 steps.append((packets[index + 1][0] - packet[0]) / count)
             else:
@@ -359,9 +446,13 @@ class Recorder:
         w = csv.writer(out)
         w.writerow(_TIME_COLUMNS + ["ecg_mv"])
         steps = self._sample_steps(self._ecg, self.ecg_hz)
-        for (device_ms, recv_unix, samples), step in zip(self._ecg, steps):
+        for (device_ms, t_unix, recv_unix, samples), step in zip(self._ecg, steps):
             for i, mv in enumerate(samples):
-                w.writerow(self._row_times(device_ms + i * step, recv_unix) + [_fmt(mv, 6)])
+                offset = i * step
+                w.writerow(
+                    self._row_times(device_ms + offset, t_unix + offset / 1000.0, recv_unix)
+                    + [_fmt(mv, 6)]
+                )
         return out.getvalue()
 
     def _imu_csv(self):
@@ -373,11 +464,12 @@ class Recorder:
             "magn_x", "magn_y", "magn_z",
         ])
         steps = self._sample_steps(self._imu, self.imu_hz)
-        for (device_ms, recv_unix, acc, gyro, magn), step in zip(self._imu, steps):
+        for (device_ms, t_unix, recv_unix, acc, gyro, magn), step in zip(self._imu, steps):
             for i in range(len(acc)):
+                offset = i * step
                 values = list(acc[i]) + list(gyro[i]) + list(magn[i])
                 w.writerow(
-                    self._row_times(device_ms + i * step, recv_unix)
+                    self._row_times(device_ms + offset, t_unix + offset / 1000.0, recv_unix)
                     + [_fmt(v, 6) for v in values]
                 )
         return out.getvalue()
@@ -386,8 +478,8 @@ class Recorder:
         out = io.StringIO()
         w = csv.writer(out)
         w.writerow(_TIME_COLUMNS + ["temp_c"])
-        for device_ms, recv_unix, celsius in self._temp:
-            w.writerow(self._row_times(device_ms, recv_unix) + [_fmt(celsius, 3)])
+        for device_ms, t_unix, recv_unix, celsius in self._temp:
+            w.writerow(self._row_times(device_ms, t_unix, recv_unix) + [_fmt(celsius, 3)])
         return out.getvalue()
 
     def _hr_csv(self):
@@ -451,16 +543,22 @@ class Recorder:
                 "anchor_unix": self._anchor_unix,
                 "anchor_device_ms": self._anchor_device_ms,
                 "drift_ms_at_stop": self._drift_ms(),
-                "timestamp_gap_anomalies": dict(self._anomalies),
+                "timestamp_gap_anomalies": self._anomalies(),
+                "clock_restarts": self._clock_restarts,
                 "interruptions": self._gaps,
             },
+            "truncated_streams": sorted(self._truncated),
             "ecg_lsb_to_mv": 0.000381469726563,
             "column_notes": {
                 "rate_hz": "the rate we subscribed at",
                 "measured_rate_hz": "the rate the sensor actually delivered, taken from "
                                     "packet timestamps - sample spacing follows this, not "
                                     "rate_hz, because the two do not always agree",
-                "t_s": "seconds since the recording started",
+                "t_s": "seconds since the recording started. The first row can be "
+                       "slightly negative: streams share one device clock, whichever "
+                       "packet arrives first anchors it, and another stream's packet "
+                       "may carry an earlier timestamp because it was sampled before "
+                       "the button was pressed and only delivered afterwards",
                 "t_device_ms": "the sensor's own monotonic clock, uint32 wraps unwrapped; "
                                "empty for hr/rr, which have no device clock",
                 "t_unix": "absolute time derived from the device clock, anchored to the "

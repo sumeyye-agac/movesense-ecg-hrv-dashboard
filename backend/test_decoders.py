@@ -15,7 +15,9 @@ import io
 import json
 import math
 import struct
+import time
 import unittest
+import unittest.mock
 import zipfile
 
 from movesense_ble import (
@@ -24,6 +26,7 @@ from movesense_ble import (
     _decode_imu9,
     _decode_temp,
 )
+import recording
 from recording import Recorder
 
 
@@ -197,19 +200,67 @@ class RecorderTimebaseTest(unittest.TestCase):
         rr_rows = self._read_csv(rec, rid, "rr.csv")
         self.assertEqual([r["rr_ms"] for r in rr_rows], ["560.500", "555.000"])
 
+    def _meta(self, rec, recording_id):
+        data = rec.get_finished(recording_id)["zip"]
+        return json.loads(zipfile.ZipFile(io.BytesIO(data)).read("meta.json"))
+
     def test_dropped_packet_is_flagged_as_an_anomaly(self):
         rec = Recorder()
         rid = rec.start(streams=["ecg"], label="", ecg_hz=125, imu_hz=52)
-        rec.record_ecg(1000, [0.1] * 4, recv_unix=1_700_000_000.0)
-        # Contiguous would be 1032; 2000 means packets went missing.
+        # Establish a cadence first - with only two packets the single gap
+        # between them *is* the cadence, and nothing can deviate from it.
+        for k in range(5):
+            rec.record_ecg(1000 + k * 32, [0.1] * 4, recv_unix=1_700_000_000.0 + k * 0.032)
+        # Contiguous would be 1160. A jump to 2000 means packets went missing.
         rec.record_ecg(2000, [0.2] * 4, recv_unix=1_700_000_001.0)
+        for k in range(5):
+            rec.record_ecg(2032 + k * 32, [0.1] * 4, recv_unix=1_700_000_001.1 + k * 0.032)
         summary = rec.stop()
 
-        meta = json.loads(
-            zipfile.ZipFile(io.BytesIO(rec.get_finished(rid)["zip"])).read("meta.json")
-        )
-        self.assertEqual(meta["clock"]["timestamp_gap_anomalies"]["ecg"], 1)
+        self.assertEqual(self._meta(rec, rid)["clock"]["timestamp_gap_anomalies"]["ecg"], 1)
         self.assertTrue(any("did not follow on" in w for w in summary["warnings"]))
+
+    def test_steady_stream_reports_no_dropped_packets(self):
+        rec = Recorder()
+        rid = rec.start(streams=["ecg"], label="", ecg_hz=125, imu_hz=52)
+        for k in range(10):
+            rec.record_ecg(1000 + k * 32, [0.1] * 4, recv_unix=1_700_000_000.0 + k * 0.032)
+        summary = rec.stop()
+
+        self.assertEqual(self._meta(rec, rid)["clock"]["timestamp_gap_anomalies"]["ecg"], 0)
+        self.assertEqual(summary["warnings"], [])
+
+    def test_sensor_reboot_re_anchors_instead_of_dating_samples_in_the_past(self):
+        # A restarted sensor's clock goes back to near zero. Read as a
+        # uint32 wrap that would be fine; read as nothing at all it dates
+        # every later sample before the recording began. Neither is right.
+        rec = Recorder()
+        rid = rec.start(streams=["ecg"], label="", ecg_hz=125, imu_hz=52)
+        now = time.time()
+        rec.record_ecg(2_622_452, [0.1], recv_unix=now)
+        rec.record_ecg(12, [0.2], recv_unix=now + 30.0)  # sensor rebooted
+        summary = rec.stop()
+
+        rows = self._read_csv(rec, rid, "ecg.csv")
+        times = [float(r["t_s"]) for r in rows]
+        self.assertTrue(all(t >= 0 for t in times), f"negative t_s after reboot: {times}")
+        self.assertLess(times[0], times[1])
+        self.assertEqual(self._meta(rec, rid)["clock"]["clock_restarts"], 1)
+        self.assertTrue(any("clock restarted" in w for w in summary["warnings"]))
+
+    def test_recording_stops_growing_at_the_sample_ceiling(self):
+        # The ceiling behaves the same at any size, and pushing two million
+        # rows through the CSV writer turns this into a five-second test.
+        with unittest.mock.patch.object(recording, "MAX_SAMPLES_PER_STREAM", 400):
+            rec = Recorder()
+            rid = rec.start(streams=["ecg"], label="", ecg_hz=125, imu_hz=52)
+            for k in range(20):
+                rec.record_ecg(1000 + k * 800, [0.1] * 100, recv_unix=time.time() + k * 0.8)
+            summary = rec.stop()
+
+            self.assertLessEqual(summary["counts"]["ecg"], 500)
+            self.assertTrue(any("ceiling" in w for w in summary["warnings"]))
+            self.assertEqual(self._meta(rec, rid)["truncated_streams"], ["ecg"])
 
     def test_spacing_follows_the_delivered_rate_not_the_requested_one(self):
         # Subscribing IMU9 at 52 Hz was observed delivering 4 samples every
