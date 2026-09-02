@@ -861,10 +861,10 @@
   }
 
   function renderProgress(status) {
-    const parts = [formatElapsed(status.elapsed_s)];
-    const ecgCount = status.counts.ecg;
-    if (ecgCount !== undefined) parts.push(`${ecgCount.toLocaleString()} ECG`);
-    recMeta.textContent = parts.join(' · ');
+    // Elapsed time only. The per-stream sample counts belong in the
+    // summary at the end, where they can be read; ticking over beside a
+    // running clock they were just noise.
+    recMeta.textContent = formatElapsed(status.elapsed_s);
   }
 
   async function pollRecordingStatus() {
