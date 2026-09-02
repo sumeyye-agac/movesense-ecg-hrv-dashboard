@@ -78,8 +78,10 @@ Two data paths run side by side:
   N×{x,y,z} float32 samples for accelerometer/gyroscope/magnetometer, N
   derived from payload size). Temperature is the odd one out —
   `[float32 Kelvin][uint32 timestamp]`, timestamp *last*, unlike the
-  other two. Fully decoded and live now — see the verification method
-  below. The light paths (temperature) are subscribed before the heavy,
+  other two. All of it is decoded and live now — the dashboard plots the
+  ECG waveform plus all three IMU9 sensors (accelerometer, gyroscope,
+  magnetometer) as separate three-axis traces. See the verification
+  method below. The light paths (temperature) are subscribed before the heavy,
   continuous ones (ECG, IMU9) at connect time — subscribing them after
   the high-rate streams were already running sometimes got no
   acknowledgment at all, presumably the notification channel being busy.

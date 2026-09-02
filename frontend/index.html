@@ -121,38 +121,6 @@
     padding: 20px;
   }
 
-  .bpm-value {
-    font-size: 56px;
-    font-weight: 600;
-    line-height: 1;
-    color: var(--accent);
-  }
-
-  .bpm-label {
-    font-size: 12px;
-    color: var(--text-dim);
-    margin-top: 10px;
-  }
-
-  .bpm-unit {
-    font-size: 16px;
-    color: var(--text-dim);
-    margin-left: 6px;
-  }
-
-  .hrv-value {
-    font-size: 56px;
-    font-weight: 600;
-    line-height: 1;
-    color: var(--warn);
-  }
-
-  .hrv-unit {
-    font-size: 16px;
-    color: var(--text-dim);
-    margin-left: 6px;
-  }
-
   .value-row {
     grid-column: 1 / -1;
     display: grid;
@@ -184,10 +152,6 @@
 
   .full-width {
     grid-column: 1 / -1;
-  }
-
-  .hidden-for-now {
-    display: none;
   }
 
   .chart-panel h2, .stream-panel h2 {
@@ -278,6 +242,16 @@
     <canvas id="accChart"></canvas>
   </div>
 
+  <div class="panel chart-panel full-width">
+    <h2>Gyroscope — live (°/s)</h2>
+    <canvas id="gyroChart"></canvas>
+  </div>
+
+  <div class="panel chart-panel full-width">
+    <h2>Magnetometer — live (µT)</h2>
+    <canvas id="magnChart"></canvas>
+  </div>
+
   <div class="panel stream-panel">
     <div class="stream-stat">
       <div class="value mono" id="ecgPackets">0</div>
@@ -342,34 +316,40 @@
   });
   const ECG_WINDOW = 125 * 4; // ~4 seconds at 125 Hz
 
-  const accChart = new Chart(document.getElementById('accChart'), {
-    type: 'line',
-    data: {
-      labels: [],
-      datasets: [
-        { label: 'x', data: [], borderColor: '#4CE0B3', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
-        { label: 'y', data: [], borderColor: '#FFB84D', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
-        { label: 'z', data: [], borderColor: '#8AB4F8', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
-      ]
-    },
-    options: {
-      animation: false,
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        x: { display: true, ticks: { display: false }, grid: { color: '#1A2129' } },
-        y: {
-          suggestedMin: -12, suggestedMax: 12,
-          grid: { color: '#1A2129' },
-          ticks: { color: '#6B7785', font: { family: 'JetBrains Mono' }, maxTicksLimit: 5 },
-        }
+  function makeAxisChart(canvasId, yMin, yMax) {
+    return new Chart(document.getElementById(canvasId), {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          { label: 'x', data: [], borderColor: '#4CE0B3', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+          { label: 'y', data: [], borderColor: '#FFB84D', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+          { label: 'z', data: [], borderColor: '#8AB4F8', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+        ]
       },
-      plugins: {
-        legend: { display: true, position: 'top', labels: { color: '#6B7785', usePointStyle: true, pointStyle: 'line' } }
+      options: {
+        animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { display: true, ticks: { display: false }, grid: { color: '#1A2129' } },
+          y: {
+            suggestedMin: yMin, suggestedMax: yMax,
+            grid: { color: '#1A2129' },
+            ticks: { color: '#6B7785', font: { family: 'JetBrains Mono' }, maxTicksLimit: 5 },
+          }
+        },
+        plugins: {
+          legend: { display: true, position: 'top', labels: { color: '#6B7785', usePointStyle: true, pointStyle: 'line' } }
+        }
       }
-    }
-  });
-  const ACC_WINDOW = 52 * 4; // ~4 seconds at 52 Hz
+    });
+  }
+
+  const accChart = makeAxisChart('accChart', -12, 12);
+  const gyroChart = makeAxisChart('gyroChart', -50, 50);
+  const magnChart = makeAxisChart('magnChart', -80, 80);
+  const IMU_WINDOW = 52 * 4; // ~4 seconds at 52 Hz
 
   function pushEcg(mvSamples) {
     const data = ecgChart.data;
@@ -384,19 +364,19 @@
     ecgChart.update();
   }
 
-  function pushAcc(accSamples) {
-    const data = accChart.data;
-    for (const [x, y, z] of accSamples) {
+  function pushAxis(chart, samples) {
+    const data = chart.data;
+    for (const [x, y, z] of samples) {
       data.labels.push('');
       data.datasets[0].data.push(x);
       data.datasets[1].data.push(y);
       data.datasets[2].data.push(z);
     }
-    while (data.labels.length > ACC_WINDOW) {
+    while (data.labels.length > IMU_WINDOW) {
       data.labels.shift();
       data.datasets.forEach(ds => ds.data.shift());
     }
-    accChart.update();
+    chart.update();
   }
 
   function pushHR(bpm, sdnnMs) {
@@ -464,7 +444,9 @@
         pushEcg(msg.mv);
       } else if (msg.type === 'imu') {
         imuPacketsThisSecond += 1;
-        pushAcc(msg.acc);
+        pushAxis(accChart, msg.acc);
+        pushAxis(gyroChart, msg.gyro);
+        pushAxis(magnChart, msg.magn);
       } else if (msg.type === 'temp') {
         tempValue.textContent = msg.celsius;
       }
