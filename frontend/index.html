@@ -568,10 +568,10 @@
       <div class="label">IMU9 packets / s</div>
     </div>
     <div class="note">
-      Decoded and verified against physics: accelerometer magnitude at
-      rest reads ~9.8 m/s² (Earth's gravity), ECG uses Movesense's
-      published raw-LSB-to-mV conversion factor. See the README for how
-      this was reverse-engineered and checked.
+      Accelerometer magnitude at rest reads ~9.8 m/s² (Earth's gravity)
+      and ECG uses Movesense's published raw-LSB-to-mV conversion factor.
+      The magnetometer's scale is not verified. See docs/protocol.md for
+      how the payload layout was worked out and checked.
     </div>
   </div>
 </main>

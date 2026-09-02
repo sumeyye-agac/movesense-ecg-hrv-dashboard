@@ -11,7 +11,11 @@ over a WebSocket. The frontend is one HTML file.
 
 [![tests](https://github.com/sumeyye-agac/movesense-ecg-hrv-dashboard/actions/workflows/tests.yml/badge.svg)](https://github.com/sumeyye-agac/movesense-ecg-hrv-dashboard/actions/workflows/tests.yml)
 
-<img src="docs/dashboard-screenshot.png" alt="Dashboard showing live heart rate, HRV, temperature, an ECG waveform, and accelerometer traces" width="760">
+<img src="docs/dashboard-1.png" alt="Top of the dashboard: recording controls, heart rate, HRV and temperature, and a live ECG waveform" width="760">
+
+<img src="docs/dashboard-2.png" alt="Rest of the same page: gyroscope and magnetometer traces, and per-second packet counts" width="760">
+
+Top and bottom of the same page.
 
 ## Run it
 
