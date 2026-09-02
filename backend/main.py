@@ -45,7 +45,7 @@ current_rates = {"ecg_hz": DEFAULT_ECG_SAMPLE_RATE_HZ, "imu_hz": DEFAULT_IMU_SAM
 
 # Bumped on every packet, only ever read as "has this advanced?". Used to
 # confirm a subscription is actually delivering, since GSP accepts an
-# unsupported sample rate and then silently sends nothing.
+# unsupported sampling rate and then silently sends nothing.
 packets_seen = {"ecg": 0, "imu": 0, "temp": 0, "hr": 0}
 
 # Rolling window for a simple SDNN (HRV) estimate. This is standard
@@ -203,7 +203,7 @@ app = FastAPI(lifespan=lifespan)
 # Any page you have open can reach a server on your own loopback address.
 # That was harmless when this only served readings, but the recording
 # endpoints start and stop captures and re-subscribe the sensor at a
-# different sample rate, so "*" would let an unrelated site you happen to
+# different sampling rate, so "*" would let an unrelated site you happen to
 # be visiting drive the hardware. Restrict it to origins that are the
 # dashboard: a local static server, or the page opened straight off disk,
 # which sends the literal origin "null".
@@ -262,7 +262,7 @@ class StartRequest(BaseModel):
 async def _wait_for_packets(streams: list[str], timeout: float = ARM_TIMEOUT_S) -> list[str]:
     """Wait until the silent-failure-prone streams are actually delivering.
 
-    Only ECG and IMU9 are watched. Their sample rate goes into the
+    Only ECG and IMU9 are watched. Their sampling rate goes into the
     subscribe path, and GSP accepts an unsupported rate without complaint
     and then sends nothing - so the subscribe succeeding proves nothing.
     Temperature only notifies on change and heart rate is roughly 1 Hz;
@@ -325,7 +325,7 @@ async def recording_start(req: StartRequest):
         try:
             await ble_client.set_rates(req.ecg_hz, req.imu_hz)
         except Exception as e:
-            raise HTTPException(502, f"Could not apply the sample rates: {e}")
+            raise HTTPException(502, f"Could not apply the sampling rates: {e}")
         current_rates.update(ecg_hz=req.ecg_hz, imu_hz=req.imu_hz)
 
         stalled = await _wait_for_packets(streams)
@@ -343,7 +343,7 @@ async def recording_start(req: StartRequest):
             raise HTTPException(
                 504,
                 f"No {names} data arrived within {ARM_TIMEOUT_S:.0f}s of subscribing. That "
-                f"sample rate is probably not supported by this sensor - the previous rate "
+                f"sampling rate is probably not supported by this sensor - the previous rate "
                 f"has been restored. Try a different one.",
             )
 

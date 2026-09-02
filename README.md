@@ -41,7 +41,7 @@ Tests: `python -m unittest discover backend`
 
 ## Recording
 
-The bar at the top of the page sets sample rates, which streams to record,
+The bar at the top of the page sets sampling rates, which streams to record,
 and a label. Stopping gives you a ZIP with one CSV per stream, a
 `meta.json`, and a README describing that capture.
 

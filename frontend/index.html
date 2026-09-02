@@ -949,7 +949,7 @@
       });
       if (!res.ok) {
         // The backend refuses rather than recording silence - an
-        // unsupported sample rate is the usual cause - so show exactly
+        // unsupported sampling rate is the usual cause - so show exactly
         // why, next to the controls that need changing.
         recMeta.textContent = '';
         showError(await readError(res, `Could not start recording (HTTP ${res.status}).`));

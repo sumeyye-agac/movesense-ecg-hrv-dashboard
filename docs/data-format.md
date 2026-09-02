@@ -1,7 +1,7 @@
 # Recording and data format
 
 A bar across the top of the dashboard holds everything a capture needs —
-sample rates, which streams to include, a free-text label, and the
+sampling rates, which streams to include, a free-text label, and the
 **Record** button. Nothing is behind a menu; the settings lock while a
 recording runs, because changing a rate means resubscribing the stream
 and would tear a hole in the data. Stopping hands back a ZIP: one CSV
@@ -12,7 +12,7 @@ what it is doing on load and adopts a running capture — button, elapsed
 time, label and all — rather than coming back looking idle while the
 recording it can no longer stop carries on.
 
-Sample rates deserve a warning. GSP has no GET verb, so there is no way
+Sampling rates deserve a warning. GSP has no GET verb, so there is no way
 to ask the sensor which rates it supports, and subscribing at an
 unsupported one is accepted and then silently delivers nothing. Starting
 a recording therefore resubscribes, waits for packets to actually

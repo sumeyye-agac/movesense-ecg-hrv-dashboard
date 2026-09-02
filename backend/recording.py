@@ -352,7 +352,7 @@ class Recorder:
             if stream in self.streams and not counts.get(stream):
                 warnings.append(
                     f"{stream.upper()} was selected but no packets arrived - "
-                    f"the sample rate may not be supported by this sensor."
+                    f"the sampling rate may not be supported by this sensor."
                 )
         if self._truncated:
             warnings.append(

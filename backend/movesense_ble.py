@@ -81,7 +81,7 @@ def _decode_ecg(payload: bytes):
 def _decode_imu9(payload: bytes):
     """[uint32 LE timestamp_ms][N accel xyz floats][N gyro xyz floats][N magn xyz floats]
     -> (timestamp_ms, acc[(x,y,z),...], gyro[(x,y,z),...], magn[(x,y,z),...]).
-    N is derived from payload length, not hardcoded - it depends on sample rate/BLE MTU.
+    N is derived from payload length, not hardcoded - it depends on sampling rate/BLE MTU.
     """
     timestamp = struct.unpack_from("<I", payload, 0)[0]
     body = payload[4:]
@@ -173,7 +173,7 @@ class MovesenseBLE:
             print(f"GSP not available on this sensor (likely firmware < 2.3.0): {e}")
 
     async def set_rates(self, ecg_hz: int, imu_hz: int):
-        """Re-subscribe ECG and IMU9 at new sample rates, live.
+        """Re-subscribe ECG and IMU9 at new sampling rates, live.
 
         GSP has no "change the rate" command, so the only way is to drop
         both subscriptions and take them out again at the new paths. The
