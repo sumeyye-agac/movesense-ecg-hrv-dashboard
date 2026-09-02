@@ -199,9 +199,18 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# Any page you have open can reach a server on your own loopback address.
+# That was harmless when this only served readings, but the recording
+# endpoints start and stop captures and re-subscribe the sensor at a
+# different sample rate, so "*" would let an unrelated site you happen to
+# be visiting drive the hardware. Restrict it to origins that are the
+# dashboard: a local static server, or the page opened straight off disk,
+# which sends the literal origin "null".
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["null"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -245,7 +254,9 @@ class StartRequest(BaseModel):
     streams: list[str] = Field(default_factory=lambda: list(ALL_STREAMS))
     ecg_hz: int = DEFAULT_ECG_SAMPLE_RATE_HZ
     imu_hz: int = DEFAULT_IMU_SAMPLE_RATE_HZ
-    label: str = ""
+    # The label reaches both meta.json and the suggested filename, so it is
+    # bounded here rather than left to whatever gets posted.
+    label: str = Field(default="", max_length=100)
 
 
 async def _wait_for_packets(streams: list[str], timeout: float = ARM_TIMEOUT_S) -> list[str]:
