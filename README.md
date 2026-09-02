@@ -3,8 +3,8 @@
 Streams ECG, IMU9 (accelerometer, gyroscope, magnetometer), heart rate and
 temperature from a Movesense MD sensor to a browser over Bluetooth Low
 Energy, and records labelled sessions to CSV for machine learning.
-Movesense's own SDK is mobile-only, so the sensor is read directly from
-Python instead.
+Movesense's mobile SDK targets Android and iOS, so the sensor is read here
+over GSP, the protocol they provide for clients that don't run it.
 
 A backend (bleak + FastAPI) talks to the sensor and forwards everything
 over a WebSocket. The frontend is one HTML file.
