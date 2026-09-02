@@ -24,9 +24,11 @@ full picture.
 
 ## Demo
 
-<img src="docs/dashboard-screenshot.png" alt="Dashboard showing live heart rate" width="700">
+<img src="docs/dashboard-screenshot.png" alt="Dashboard showing live heart rate, HRV, temperature, an ECG waveform, and accelerometer traces" width="700">
 
-*Live capture from the dashboard, heart rate updating in real time.*
+*Live capture from the dashboard: heart rate, HRV and skin temperature
+across the top, with the decoded ECG waveform and accelerometer axes
+streaming below.*
 
 To replace this with a live GIF: wear the sensor, run the app,
 screen-record ~15 seconds of the numbers and charts updating live
@@ -141,8 +143,10 @@ file server). It connects to `ws://localhost:8000/ws`.
 ## Putting this on GitHub
 
 This project has no real API keys or cloud credentials — the Movesense
-connection is local BLE, FastAPI has no auth, Chart.js loads from a public
-CDN. The only per-machine value is `MOVESENSE_ADDRESS` in `.env`, and
+connection is local BLE, FastAPI has no auth, and Chart.js is vendored at
+`frontend/vendor/chart.umd.js` rather than pulled from a CDN, so the
+dashboard needs no network access of its own. The only per-machine value
+is `MOVESENSE_ADDRESS` in `.env`, and
 that's not sensitive (it's a BLE address/UUID, not a credential) — it's
 excluded from git via `.gitignore` mainly because it's local config, not
 because it's dangerous if it leaked.
