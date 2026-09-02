@@ -1,5 +1,7 @@
 # Movesense Live Dashboard
 
+> **Status:** Under development.
+
 Streams live heart rate, ECG, IMU9 (accelerometer + gyroscope +
 magnetometer), and temperature from a Movesense MD sensor to a browser
 dashboard over Bluetooth Low Energy — no phone app in the middle. A
@@ -27,19 +29,19 @@ full picture.
 
 <img src="docs/dashboard-screenshot.png" alt="Dashboard showing live heart rate, HRV, temperature, an ECG waveform, and accelerometer traces" width="700">
 
-*Live capture from the dashboard: heart rate, HRV and skin temperature
+<!--*Live capture from the dashboard: heart rate, HRV and skin temperature
 across the top, with the decoded ECG waveform and accelerometer axes
-streaming below.*
+streaming below.*-->
 
-To replace this with a live GIF: wear the sensor, run the app,
+<!--To replace this with a live GIF: wear the sensor, run the app,
 screen-record ~15 seconds of the numbers and charts updating live
-(QuickTime's screen recording on macOS works fine), then convert:
+(QuickTime's screen recording on macOS works fine), then convert:-->
 
-```bash
+<!--```bash
 ffmpeg -i demo.mov -vf "fps=12,scale=800:-1:flags=lanczos" -loop 0 docs/demo.gif
-```
+```-->
 
-Drop the result at `docs/demo.gif` and swap the `<img>` tag above for it.
+<!--Drop the result at `docs/demo.gif` and swap the `<img>` tag above for it.-->
 
 ## Requirements
 
@@ -258,7 +260,7 @@ recognizable key pattern (AWS, Stripe, OpenAI, etc.) before it lands. That
 catches known patterns, not custom ones like a bare device address, so
 `.gitignore` is still doing the actual work here.
 
-## Extending this
+<!--## Extending this
 
 - **R-peak detection and ECG-derived HRV** (RMSSD, etc.) on top of the
   decoded ECG waveform, instead of deriving HRV only from the coarser
@@ -273,6 +275,9 @@ catches known patterns, not custom ones like a bare device address, so
   notifications. Worth revisiting if GSP ever exposes a real GET verb.
 - **Signal quality indicator** for the ECG trace, since electrode
   contact quality visibly affects it.
+- **Magnetometer calibration** — a rotate-and-fit-a-sphere routine would
+  both remove the hard-iron offset and finally settle whether the decoded
+  scale is right (see the verification section above).-->
 
 ## References
 
