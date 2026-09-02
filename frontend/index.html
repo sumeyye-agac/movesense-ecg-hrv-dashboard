@@ -155,6 +155,10 @@
     margin-top: 10px;
   }
 
+  /* Temperature notifies on change only, so a fresh page can sit at "--"
+     for minutes. Say why rather than looking broken. */
+  .metric-note { opacity: 0.65; }
+
   .full-width {
     grid-column: 1 / -1;
   }
@@ -205,28 +209,79 @@
 
   /* --- Recording --- */
 
-  .record-controls {
+  .rec-bar {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    position: relative;
-    margin-right: 14px;
-    padding-right: 14px;
-    border-right: 1px solid var(--panel-border);
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 18px;
+    max-width: 1040px;
+    margin: 0 auto 24px auto;
+    padding: 16px 18px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
   }
+
+  .rec-field { display: flex; flex-direction: column; gap: 7px; }
+  .rec-grow { flex: 1 1 160px; min-width: 140px; }
+  .rec-action { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+
+  .rec-field > label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    color: var(--text-dim);
+  }
+
+  .rec-field select, .rec-field input[type="text"] {
+    font: inherit;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 7px 9px;
+    height: 34px;
+  }
+
+  .rec-field select:disabled, .rec-field input:disabled { opacity: 0.45; }
+  .rec-field select { min-width: 88px; }
+
+  .chips { display: flex; gap: 6px; }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    height: 34px;
+    padding: 0 11px;
+    font-size: 12px;
+    color: var(--text-dim);
+    background: var(--bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .chip input { position: absolute; opacity: 0; pointer-events: none; }
+  .chip:has(input:checked) { color: var(--accent); border-color: var(--accent-dim); background: rgba(76, 224, 179, 0.08); }
+  .chip:has(input:disabled) { cursor: not-allowed; opacity: 0.5; }
+  .chip:hover:not(:has(input:disabled)) { border-color: var(--text-dim); }
 
   .record-btn {
     display: inline-flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
+    height: 34px;
     font: inherit;
     font-size: 13px;
     color: var(--text);
-    background: var(--panel);
+    background: var(--bg);
     border: 1px solid var(--panel-border);
     border-radius: 7px;
-    padding: 7px 13px;
+    padding: 0 15px;
     cursor: pointer;
+    white-space: nowrap;
   }
 
   .record-btn:hover:not(:disabled) { border-color: var(--text-dim); }
@@ -240,15 +295,8 @@
     flex-shrink: 0;
   }
 
-  .record-btn.recording {
-    border-color: #F2545B;
-    color: #F2545B;
-  }
-
-  .record-btn.recording .bullet {
-    border-radius: 1px;
-    animation: rec-pulse 1.4s ease-in-out infinite;
-  }
+  .record-btn.recording { border-color: #F2545B; color: #F2545B; }
+  .record-btn.recording .bullet { border-radius: 1px; animation: rec-pulse 1.4s ease-in-out infinite; }
 
   @keyframes rec-pulse {
     0%, 100% { opacity: 1; }
@@ -262,33 +310,16 @@
     white-space: nowrap;
   }
 
-  .icon-btn {
-    font: inherit;
-    font-size: 14px;
-    line-height: 1;
-    color: var(--text-dim);
-    background: transparent;
-    border: 1px solid var(--panel-border);
-    border-radius: 7px;
-    padding: 8px 10px;
-    cursor: pointer;
-  }
-
-  .icon-btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
-  .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  .popover {
-    position: absolute;
-    top: calc(100% + 10px);
-    right: 0;
-    z-index: 40;
-    width: 290px;
-    background: var(--panel);
-    border: 1px solid var(--panel-border);
-    border-radius: 10px;
-    padding: 18px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-    text-align: left;
+  .bar-error {
+    max-width: 1040px;
+    margin: -14px auto 24px auto;
+    padding: 11px 14px;
+    background: rgba(242, 84, 91, 0.1);
+    border: 1px solid rgba(242, 84, 91, 0.35);
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: #F2545B;
   }
 
   .field { margin-bottom: 15px; }
@@ -303,7 +334,7 @@
     margin-bottom: 7px;
   }
 
-  .field select, .field input[type="text"] {
+  .field input[type="text"] {
     width: 100%;
     font: inherit;
     font-size: 13px;
@@ -312,16 +343,6 @@
     border: 1px solid var(--panel-border);
     border-radius: 6px;
     padding: 7px 9px;
-  }
-
-  .checks { display: grid; gap: 7px; }
-
-  .checks label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-    cursor: pointer;
   }
 
   .field-hint {
@@ -437,47 +458,48 @@
     <div class="device" id="deviceAddress">connecting to backend&hellip;</div>
   </div>
   <div class="status">
-    <div class="record-controls">
-      <button class="record-btn" id="recordBtn" disabled>
-        <span class="bullet"></span><span id="recordBtnLabel">Record</span>
-      </button>
-      <span class="rec-meta" id="recMeta"></span>
-      <button class="icon-btn" id="settingsBtn" title="Recording settings" disabled>&#9881;</button>
-
-      <div class="popover" id="settingsPanel" hidden>
-        <div class="field">
-          <label for="ecgRate">ECG sample rate</label>
-          <select id="ecgRate"></select>
-        </div>
-        <div class="field">
-          <label for="imuRate">IMU9 sample rate</label>
-          <select id="imuRate"></select>
-        </div>
-        <div class="field">
-          <label>Streams to record</label>
-          <div class="checks">
-            <label><input type="checkbox" value="ecg" checked> ECG</label>
-            <label><input type="checkbox" value="imu" checked> IMU9 (acc + gyro + magn)</label>
-            <label><input type="checkbox" value="hr" checked> Heart rate + RR intervals</label>
-            <label><input type="checkbox" value="temp" checked> Temperature</label>
-          </div>
-        </div>
-        <div class="field">
-          <label for="recLabel">Label</label>
-          <input type="text" id="recLabel" placeholder="resting, walking&hellip;" maxlength="40">
-          <div class="field-hint">
-            Goes into the filename and meta.json &mdash; useful as a class label later.
-          </div>
-        </div>
-      </div>
-    </div>
-
     <span class="last-update" id="lastUpdate"></span>
     <span class="gsp-badge" id="gspBadge" style="display: none;"></span>
     <span class="dot" id="statusDot"></span>
     <span id="statusText">offline</span>
   </div>
 </header>
+
+<section class="rec-bar" id="recBar">
+  <div class="rec-field">
+    <label for="ecgRate">ECG</label>
+    <select id="ecgRate"></select>
+  </div>
+
+  <div class="rec-field">
+    <label for="imuRate">IMU9</label>
+    <select id="imuRate"></select>
+  </div>
+
+  <div class="rec-field">
+    <label>Record</label>
+    <div class="chips" id="streamChips">
+      <label class="chip"><input type="checkbox" value="ecg" checked><span>ECG</span></label>
+      <label class="chip"><input type="checkbox" value="imu" checked><span>IMU9</span></label>
+      <label class="chip"><input type="checkbox" value="hr" checked><span>HR + RR</span></label>
+      <label class="chip"><input type="checkbox" value="temp" checked><span>Temp</span></label>
+    </div>
+  </div>
+
+  <div class="rec-field rec-grow">
+    <label for="recLabel">Label</label>
+    <input type="text" id="recLabel" placeholder="resting, walking&hellip;" maxlength="40">
+  </div>
+
+  <div class="rec-action">
+    <button class="record-btn" id="recordBtn" disabled>
+      <span class="bullet"></span><span id="recordBtnLabel">Record</span>
+    </button>
+    <span class="rec-meta" id="recMeta"></span>
+  </div>
+</section>
+
+<div class="bar-error" id="recError" hidden></div>
 
 <div class="modal-backdrop" id="saveModal" hidden>
   <div class="modal">
@@ -512,7 +534,7 @@
 
     <div class="panel">
       <div class="metric-value mono" style="color: var(--info);"><span id="tempValue">--</span><span class="metric-unit">°C</span></div>
-      <div class="metric-label">Temperature</div>
+      <div class="metric-label">Temperature <span class="metric-note" id="tempNote">&mdash; only sent when it changes</span></div>
     </div>
   </div>
 
@@ -563,6 +585,7 @@
   const bpmValue = document.getElementById('bpmValue');
   const sdnnValue = document.getElementById('sdnnValue');
   const tempValue = document.getElementById('tempValue');
+  const tempNote = document.getElementById('tempNote');
   const ecgPackets = document.getElementById('ecgPackets');
   const imuPackets = document.getElementById('imuPackets');
 
@@ -733,6 +756,7 @@
         pushAxis(magnChart, msg.magn);
       } else if (msg.type === 'temp') {
         tempValue.textContent = msg.celsius;
+        tempNote.hidden = true;
       }
     };
   }
@@ -741,15 +765,15 @@
 
   const API = `http://${BACKEND_HOST}`;
 
+  const recBar = document.getElementById('recBar');
+  const recError = document.getElementById('recError');
   const recordBtn = document.getElementById('recordBtn');
   const recordBtnLabel = document.getElementById('recordBtnLabel');
   const recMeta = document.getElementById('recMeta');
-  const settingsBtn = document.getElementById('settingsBtn');
-  const settingsPanel = document.getElementById('settingsPanel');
   const ecgRate = document.getElementById('ecgRate');
   const imuRate = document.getElementById('imuRate');
   const recLabel = document.getElementById('recLabel');
-  const streamChecks = settingsPanel.querySelectorAll('.checks input');
+  const streamChecks = document.getElementById('streamChips').querySelectorAll('input');
 
   const saveModal = document.getElementById('saveModal');
   const saveSubtitle = document.getElementById('saveSubtitle');
@@ -765,7 +789,27 @@
   let pendingRecordingId = null;
   let statusTimer = null;
 
-  const STREAM_NAMES = { ecg: 'ECG', imu: 'IMU9', hr: 'Heart rate', rr: 'RR intervals', temp: 'Temperature' };
+  const STREAM_NAMES = {
+    ecg: 'ECG', imu: 'IMU9', hr: 'Heart rate', rr: 'RR intervals', temp: 'Temperature',
+  };
+
+  function showError(message) {
+    recError.textContent = message;
+    recError.hidden = false;
+  }
+
+  function clearError() {
+    recError.hidden = true;
+  }
+
+  async function readError(res, fallback) {
+    try {
+      const body = await res.json();
+      return body.detail || fallback;
+    } catch {
+      return fallback;
+    }
+  }
 
   function fillRates(select, rates, current) {
     select.innerHTML = '';
@@ -775,20 +819,6 @@
       option.textContent = `${hz} Hz`;
       option.selected = hz === current;
       select.appendChild(option);
-    }
-  }
-
-  async function loadRecordingOptions() {
-    try {
-      const res = await fetch(`${API}/recording/options`);
-      const data = await res.json();
-      fillRates(ecgRate, data.ecg_rates_hz, data.current.ecg_hz);
-      fillRates(imuRate, data.imu_rates_hz, data.current.imu_hz);
-      recordBtn.disabled = false;
-      settingsBtn.disabled = false;
-    } catch {
-      recordBtn.disabled = true;
-      settingsBtn.disabled = true;
     }
   }
 
@@ -820,25 +850,90 @@
     if (!recording) recMeta.textContent = '';
   }
 
+  function startPolling() {
+    if (statusTimer) return;
+    statusTimer = setInterval(pollRecordingStatus, 1000);
+  }
+
+  function stopPolling() {
+    clearInterval(statusTimer);
+    statusTimer = null;
+  }
+
+  function renderProgress(status) {
+    const parts = [formatElapsed(status.elapsed_s)];
+    const ecgCount = status.counts.ecg;
+    if (ecgCount !== undefined) parts.push(`${ecgCount.toLocaleString()} ECG`);
+    recMeta.textContent = parts.join(' · ');
+  }
+
   async function pollRecordingStatus() {
     try {
       const res = await fetch(`${API}/recording/status`);
-      const data = await res.json();
-      if (!data.recording) return;
-      const ecgCount = data.counts.ecg || 0;
-      recMeta.textContent = `${formatElapsed(data.elapsed_s)} · ${ecgCount.toLocaleString()} ECG`;
+      const status = await res.json();
+      if (!status.recording) {
+        // Something else stopped it - a backend restart, most likely.
+        stopPolling();
+        setRecordingUI(false);
+        return;
+      }
+      renderProgress(status);
     } catch {
       recMeta.textContent = 'backend unreachable';
+    }
+  }
+
+  async function syncRecordingState() {
+    // A page reload used to strand a running recording: the UI came back
+    // showing "Record", and pressing it just returned "already running"
+    // with no way to stop the thing. Adopt whatever the backend is doing.
+    try {
+      const [optionsRes, statusRes, sensorRes] = await Promise.all([
+        fetch(`${API}/recording/options`),
+        fetch(`${API}/recording/status`),
+        fetch(`${API}/status`),
+      ]);
+      const options = await optionsRes.json();
+      const status = await statusRes.json();
+      const sensor = await sensorRes.json();
+
+      if (!ecgRate.options.length || !isRecording) {
+        fillRates(ecgRate, options.ecg_rates_hz, options.current.ecg_hz);
+        fillRates(imuRate, options.imu_rates_hz, options.current.imu_hz);
+      }
+
+      if (status.recording) {
+        if (!isRecording) {
+          setRecordingUI(true);
+          if (status.label) recLabel.value = status.label;
+          startPolling();
+        }
+        renderProgress(status);
+        recordBtn.disabled = false;
+      } else {
+        if (isRecording) {
+          stopPolling();
+          setRecordingUI(false);
+        }
+        // Nothing to record without a sensor, so say so rather than
+        // letting the button fail with a dialog.
+        recordBtn.disabled = !sensor.connected;
+        recordBtn.title = sensor.connected ? '' : 'Sensor is not connected';
+      }
+    } catch {
+      recordBtn.disabled = true;
+      recordBtn.title = 'Backend unreachable';
     }
   }
 
   async function startRecording() {
     const streams = selectedStreams();
     if (streams.length === 0) {
-      settingsPanel.hidden = false;
+      showError('Pick at least one stream to record.');
       return;
     }
 
+    clearError();
     recordBtn.disabled = true;
     recMeta.textContent = 'starting…';
     try {
@@ -853,20 +948,19 @@
         }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        // The backend refuses rather than recording silence, so surface
-        // exactly why instead of leaving the button looking broken.
+        // The backend refuses rather than recording silence - an
+        // unsupported sample rate is the usual cause - so show exactly
+        // why, next to the controls that need changing.
         recMeta.textContent = '';
-        alert(err.detail || `Could not start recording (HTTP ${res.status}).`);
+        showError(await readError(res, `Could not start recording (HTTP ${res.status}).`));
         return;
       }
-      settingsPanel.hidden = true;
       setRecordingUI(true);
       pollRecordingStatus();
-      statusTimer = setInterval(pollRecordingStatus, 1000);
+      startPolling();
     } catch {
       recMeta.textContent = '';
-      alert('Could not reach the backend.');
+      showError('Could not reach the backend.');
     } finally {
       recordBtn.disabled = false;
     }
@@ -874,19 +968,19 @@
 
   async function stopRecording() {
     recordBtn.disabled = true;
-    clearInterval(statusTimer);
-    statusTimer = null;
+    stopPolling();
     try {
       const res = await fetch(`${API}/recording/stop`, { method: 'POST' });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        alert(err.detail || `Could not stop recording (HTTP ${res.status}).`);
+        showError(await readError(res, `Could not stop recording (HTTP ${res.status}).`));
         return;
       }
+      clearError();
       setRecordingUI(false);
       showSaveModal(await res.json());
     } catch {
-      alert('Could not reach the backend.');
+      showError('Could not reach the backend - the recording is still running.');
+      startPolling();
     } finally {
       recordBtn.disabled = false;
     }
@@ -900,7 +994,14 @@
 
     saveSummary.innerHTML = '';
     const counts = summary.counts || {};
-    for (const [key, value] of Object.entries(counts)) {
+    const entries = Object.entries(counts);
+    if (entries.length === 0) {
+      const k = document.createElement('div');
+      k.className = 'k';
+      k.textContent = 'No samples captured';
+      saveSummary.append(k, document.createElement('div'));
+    }
+    for (const [key, value] of entries) {
       const k = document.createElement('div');
       k.className = 'k';
       k.textContent = STREAM_NAMES[key] || key;
@@ -908,12 +1009,6 @@
       v.className = 'v mono';
       v.textContent = value.toLocaleString();
       saveSummary.append(k, v);
-    }
-    if (Object.keys(counts).length === 0) {
-      const k = document.createElement('div');
-      k.className = 'k';
-      k.textContent = 'No samples captured';
-      saveSummary.append(k, document.createElement('div'));
     }
 
     if (summary.warnings && summary.warnings.length) {
@@ -923,8 +1018,7 @@
         li.textContent = warning;
         list.appendChild(li);
       }
-      saveWarnings.innerHTML = '';
-      saveWarnings.appendChild(list);
+      saveWarnings.replaceChildren(list);
       saveWarnings.hidden = false;
     } else {
       saveWarnings.hidden = true;
@@ -938,6 +1032,8 @@
     saveError.hidden = true;
     saveBtn.disabled = false;
     saveModal.hidden = false;
+    saveFilename.focus();
+    saveFilename.select();
   }
 
   async function saveRecording() {
@@ -950,7 +1046,7 @@
 
     try {
       const res = await fetch(`${API}/recording/${pendingRecordingId}/export.zip`);
-      if (!res.ok) throw new Error(`export failed (HTTP ${res.status})`);
+      if (!res.ok) throw new Error(await readError(res, `export failed (HTTP ${res.status})`));
       const blob = await res.blob();
 
       if (window.showSaveFilePicker) {
@@ -994,20 +1090,25 @@
   }
 
   recordBtn.addEventListener('click', () => (isRecording ? stopRecording() : startRecording()));
-  settingsBtn.addEventListener('click', () => { settingsPanel.hidden = !settingsPanel.hidden; });
   saveBtn.addEventListener('click', saveRecording);
   discardBtn.addEventListener('click', closeSaveModal);
 
-  document.addEventListener('click', (event) => {
-    if (!settingsPanel.hidden
-        && !settingsPanel.contains(event.target)
-        && event.target !== settingsBtn) {
-      settingsPanel.hidden = true;
-    }
+  saveModal.addEventListener('click', (event) => {
+    if (event.target === saveModal) closeSaveModal();
   });
 
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !saveModal.hidden) closeSaveModal();
+  });
+
+  recBar.addEventListener('change', clearError);
+
+  // Also covers the case where the backend or the sensor comes back after
+  // the page was already open.
+  syncRecordingState();
+  setInterval(syncRecordingState, 5000);
+
   fetchStatus();
-  loadRecordingOptions();
   connect();
 </script>
 
