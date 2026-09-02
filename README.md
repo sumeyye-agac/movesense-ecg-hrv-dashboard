@@ -1,61 +1,133 @@
 # Movesense Live Dashboard
 
-> **Status:** Under development.
+**Live ECG, motion and heart-rate streaming from a medical-grade wearable straight into a browser — no phone app, no vendor SDK — with a one-click export built for machine learning.**
 
-Streams live heart rate, ECG, IMU9 (accelerometer + gyroscope +
-magnetometer), and temperature from a Movesense MD sensor to a browser
-dashboard over Bluetooth Low Energy — no phone app in the middle. A
-live HRV (SDNN) estimate is also computed from the heart-rate signal,
-but its accuracy depends heavily on electrode contact quality and
-hasn't been validated under controlled (resting, well-fitted strap)
-conditions yet — treat it as experimental for now.
+[![tests](https://github.com/sumeyye-agac/movesense-ecg-hrv-dashboard/actions/workflows/tests.yml/badge.svg)](https://github.com/sumeyye-agac/movesense-ecg-hrv-dashboard/actions/workflows/tests.yml)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
+![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
 
-ECG, IMU9, and temperature arrive as small binary payloads that
-Movesense doesn't publish a written byte-layout spec for. Rather than
-guess, the layout here was reverse-engineered from live captures and
-checked against physics before trusting it: decoded accelerometer
-samples read ~9.8 m/s² at rest (Earth's gravity); decoded ECG samples,
-scaled by Movesense's own published LSB→mV conversion factor, produce a
-smooth, physiologically plausible signal at exactly the subscribed rate;
-decoded temperature reads ~34 °C against skin, and a byte-order swap
-caught during verification would otherwise have silently reported 0
-Kelvin. The magnetometer is the one channel still unconfirmed — see
-below for why its obvious check doesn't actually work.
-See [How the byte format was verified](#how-the-byte-format-was-verified)
-for the actual method, and [Architecture](#architecture) for the
-full picture.
+<img src="docs/dashboard-screenshot.png" alt="Dashboard showing live heart rate, HRV, temperature, an ECG waveform, and accelerometer traces" width="820">
 
-## Demo
+`Python` · `FastAPI` · `bleak (BLE)` · `WebSocket` · `vanilla JS` · `Chart.js`
 
-<img src="docs/dashboard-screenshot.png" alt="Dashboard showing live heart rate, HRV, temperature, an ECG waveform, and accelerometer traces" width="700">
+> **Status:** under development. Everything described below works on real
+> hardware; interfaces may still move.
 
-<!--*Live capture from the dashboard: heart rate, HRV and skin temperature
-across the top, with the decoded ECG waveform and accelerometer axes
-streaming below.*-->
+---
 
-<!--To replace this with a live GIF: wear the sensor, run the app,
-screen-record ~15 seconds of the numbers and charts updating live
-(QuickTime's screen recording on macOS works fine), then convert:-->
+## What it does
 
-<!--```bash
-ffmpeg -i demo.mov -vf "fps=12,scale=800:-1:flags=lanczos" -loop 0 docs/demo.gif
-```-->
 
-<!--Drop the result at `docs/demo.gif` and swap the `<img>` tag above for it.-->
+- **Streams five signals live** — ECG (125 Hz), accelerometer, gyroscope,
+  magnetometer (52 Hz), heart rate, and skin temperature — from a
+  Movesense MD sensor over Bluetooth Low Energy.
+- **Talks to the sensor directly.** Movesense's own SDK is mobile-only;
+  this speaks their GATT SensorData Protocol from Python, so a laptop or
+  a Raspberry Pi is enough.
+- **Computes live HRV** (SDNN) from RR-intervals as they arrive.
+- **Records to a labelled dataset.** One click gives you a ZIP of
+  per-stream CSVs, a machine-readable `meta.json`, and a generated
+  README describing that specific capture.
+- **Survives the real world** — reconnects after a dropped BLE link,
+  keeps recording, and adopts a running capture if you reload the page.
 
-## Requirements
+## What was actually hard
 
-- A Movesense MD sensor on **firmware 2.3.0 or later** (2.3.1 for the MD/
-  medical variant specifically). GSP shipped as part of the default
-  firmware starting there; on older firmware the GSP subscribe in this
-  repo won't get a response. Check/update via the Movesense Showcase app.
-  MD's certified firmware line is gated behind Movesense's medical
-  software repository (request access via medical@movesense.com) rather
-  than being publicly downloadable like the non-medical HR+/HR2/Flash line.
-- Python 3.10+, and a machine with BLE (macOS, Linux, or Windows).
-- `ffmpeg`, only if you're recording the demo GIF above.
+
+The streaming part is plumbing. These are the problems that took the work,
+and they are the reason the data can be trusted:
+
+#### The measurement format is undocumented — so it was verified, not guessed
+
+Movesense publishes the GSP command envelope but not the byte layout of
+the measurements inside it. Guessing at a binary format for a biosignal
+and trusting it blind is worse than not decoding it at all, so every
+decoder was checked against something independently known to be true:
+accelerometer magnitude against gravity, ECG against Movesense's
+published mV conversion factor, temperature against a plausible skin
+reading.
+
+That last check earned its keep. The schema lists `Timestamp` before
+`Measurement`; the wire order turns out to be the reverse. Read the
+documented way it decodes to **0 Kelvin** — absolute zero, from a sensor
+against someone's chest — while parsing perfectly cleanly as a valid
+float. A "did it crash?" check would have shipped it.
+→ [How the byte format was verified](#how-the-byte-format-was-verified)
+
+#### Bluetooth destroys timing if you let it
+
+BLE delivers ECG in batches: one timestamp, sixteen samples, all arriving
+at once. Stamp them all with the packet's arrival time and you get a
+staircase that corrupts every interval measurement downstream — which,
+for ECG, means HRV. Samples are spread across their packet instead, and
+the export carries **two clocks side by side**: the sensor's own, which
+spaces samples accurately, and the host's, which is absolute. Their
+difference is the Bluetooth latency, which stays visible in the data
+rather than being baked invisibly into the timeline.
+→ [The timestamp model](#the-timestamp-model)
+
+#### The sensor lies about its sample rate
+
+Subscribe IMU9 at 52 Hz and it delivers **54.05 Hz** — four samples every
+74 ms. Interpolating on the rate you asked for pushes each packet's
+samples ahead of the truth and snaps them back at the next packet: a
+sawtooth in the one column whose entire job is even spacing. Spacing is
+measured from consecutive packet timestamps instead, and `meta.json`
+records what was requested and what arrived, separately.
+
+#### An empty recording is worse than no recording
+
+GSP has no GET verb, so there is no way to ask the sensor which rates it
+supports — an unsupported one is accepted and then silently delivers
+nothing. Starting a recording resubscribes, waits for real packets, and
+**refuses to start** if none arrive, restoring the last working rate.
+Ten minutes of silence discovered later is the worse outcome.
+
+#### Honest about what is not verified
+
+The magnetometer decodes into stable, well-structured values, but its
+magnitude reads ~11 µT against Earth's ~25–65 µT. The usual check does
+not work on a stationary sensor: an uncalibrated magnetometer's
+hard-iron offset means one orientation measures the offset as much as
+the field. So it is documented as **unverified** rather than asserted,
+in the README, in the code, and in every exported dataset.
+
+## Verified on real hardware
+
+
+From a live capture, not a simulation:
+
+| check | result |
+|---|---|
+| ECG sample spacing | exactly 8.000 ms, zero variance (125.000 Hz) |
+| ECG amplitude | −0.36 to +0.52 mV — physiological |
+| Accelerometer at rest | 9.77 m/s² — gravity |
+| RR-intervals vs. reported bpm | 67.4 vs. 65–70 bpm — independently consistent |
+| Dropped packets | 0 |
+| Test suite | 20 tests, no sensor required, green in CI |
+
+## Quick start
+
+
+```bash
+pip install -r backend/requirements.txt
+
+cd backend
+python scan.py                    # find your sensor's BLE address
+cp .env.example .env              # put the address in it
+uvicorn main:app --reload
+
+python -m http.server 8080 --directory ../frontend   # then open localhost:8080
+```
+
+No sensor to hand? The backend starts without one, so the dashboard and
+the API are still explorable. Fuller detail is in the collapsible sections
+at the bottom.
+
+---
 
 ## Architecture
+
 
 ```
 Movesense MD sensor  --BLE-->  Python backend (bleak)  --WebSocket-->  Browser dashboard
@@ -90,6 +162,7 @@ Two data paths run side by side:
   acknowledgment at all, presumably the notification channel being busy.
 
 ## How the byte format was verified
+
 
 Movesense's GSP spec documents the command/response envelope (HELLO,
 SUBSCRIBE, response codes) but not the byte layout of the measurement
@@ -141,27 +214,8 @@ This is the difference between "it parses without crashing" and "it's
 verified" — worth being explicit about for a biosignal, and a
 reasonable template for decoding any undocumented binary sensor format.
 
-## Setup
-
-```bash
-cd backend
-pip install -r requirements.txt
-
-python scan.py                                    # find your sensor's BLE address
-cp .env.example .env                              # then edit .env with your address
-uvicorn main:app --reload
-```
-
-Then open `frontend/index.html` in a browser (or serve it with any static
-file server). It connects to `ws://localhost:8000/ws`.
-
-To run the tests:
-
-```bash
-python -m unittest discover backend
-```
-
 ## Recording
+
 
 A bar across the top of the dashboard holds everything a capture needs —
 sample rates, which streams to include, a free-text label, and the
@@ -219,6 +273,8 @@ is what a loader parses — the measured rates, the clock anchor and drift,
 sample counts — while the README is what a person opening the archive
 months later reads, with this recording's own numbers and warnings in it.
 
+### The timestamp model
+
 Two things about the timestamps are worth understanding before using
 this data, because both are easy to get wrong silently:
 
@@ -269,32 +325,22 @@ ecg = pd.read_csv("ecg.csv")
 ecg["t_unix"].diff().describe()   # should sit at 1/rate
 ```
 
-## Putting this on GitHub
+## Security
 
-This project has no real API keys or cloud credentials — the Movesense
-connection is local BLE, FastAPI has no auth, and Chart.js is vendored at
-`frontend/vendor/chart.umd.js` rather than pulled from a CDN, so the
-dashboard needs no network access of its own. The only per-machine value
-is `MOVESENSE_ADDRESS` in `.env`, and
-that's not sensitive (it's a BLE address/UUID, not a credential) — it's
-excluded from git via `.gitignore` mainly because it's local config, not
-because it's dangerous if it leaked.
 
-The backend still has no authentication, so keep it on localhost. It does
-restrict CORS to local origins rather than allowing everything: the
-recording endpoints start and stop captures and re-subscribe the sensor
-at a different sample rate, and any page you have open can reach a server
-on your own loopback address, so `*` would let an unrelated site drive
-your hardware.
+There are no cloud credentials to leak: the sensor link is local BLE,
+and Chart.js is vendored at `frontend/vendor/chart.umd.js` rather than
+pulled from a CDN, so the dashboard needs no network access of its own.
+The one per-machine value, `MOVESENSE_ADDRESS`, lives in a gitignored
+`.env` — it is a device address, not a credential, but it is local
+config either way.
 
-If you add real credentials later (a cloud API key for ECG analysis,
-etc.), the same pattern applies: put them in `.env`, never in source, and
-keep `.env.example` (with placeholder values) as the checked-in template.
-As a backstop, GitHub's secret scanning + push protection are on by
-default and free for public repos — they'll block a push that contains a
-recognizable key pattern (AWS, Stripe, OpenAI, etc.) before it lands. That
-catches known patterns, not custom ones like a bare device address, so
-`.gitignore` is still doing the actual work here.
+**CORS is restricted to local origins**, not left open. That matters more
+than it first looks: the recording endpoints start and stop captures and
+re-subscribe the sensor at a different sample rate, and any page you have
+open can reach a server on your own loopback address. With `*`, a site
+you happened to be visiting could have driven your hardware. The backend
+has no authentication, so it belongs on localhost regardless.
 
 <!--## Extending this
 
@@ -315,22 +361,47 @@ catches known patterns, not custom ones like a bare device address, so
   both remove the hard-iron offset and finally settle whether the decoded
   scale is right (see the verification section above).-->
 
-## References
+---
 
-- Movesense MD Developer Kit spec — https://www.movesense.com/product/movesense-md-developer-kit-mdr/
-- GATT SensorData Protocol (GSP) spec — https://www.movesense.com/docs/esw/gatt_sensordata_protocol/
-- Movesense sample apps incl. `gatt_sensordata_app` + its Python client (parses ECG/IMU9 from SBEM) — https://www.movesense.com/docs/esw/sample_applications/
-- Movesense system/mobile overview (Whiteboard vs GSP) — https://www.movesense.com/docs/system/system_overview/ , https://www.movesense.com/docs/mobile/mobile_sw_overview/
-- Firmware 2.3.0 / 2.3.1 release notes (GSP becomes default firmware) — https://www.movesense.com/news/2024/12/movesense-firmware-update-2-3-0-a-perfect-holiday-gift-for-developers-and-researchers/ , https://www.movesense.com/news/2025/06/movesense-sensor-firmware-2-3-1-released-a-major-upgrade-for-medical-use/
-- Movesense's official Python Datalogger Tool (also decodes SBEM, for flash recordings) — https://bitbucket.org/movesense/python-datalogger-tool
-- sensein/movesense-py, a fork/extension of the above, including `docs/movesense-api.md` (Whiteboard schemas + the ECG LSB→mV conversion factor used here) — https://github.com/sensein/movesense-py
-- Movesense news post cataloguing these official tools — https://www.movesense.com/news/2025/11/recording-data-with-movesense-sensors-five-free-tools-to-get-you-started/
-- bleak (BLE library) docs — https://bleak.readthedocs.io/ , https://github.com/hbldh/bleak
-- Bluetooth Heart Rate Service measurement format, corroborating source — https://blefyi.com/guide/python-bleak/
-- Bluetooth SIG Heart Rate Service spec (RR-Interval field, used for the HRV/SDNN feature) — https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/HRS_v1.0/out/en/index-en.html
-- FastAPI lifespan events (pattern used in `main.py`) — https://fastapi.tiangolo.com/advanced/events/
+<details>
+<summary><b>Requirements — sensor, firmware, platform</b></summary>
 
-## Notes
+- A Movesense MD sensor on **firmware 2.3.0 or later** (2.3.1 for the MD/
+  medical variant specifically). GSP shipped as part of the default
+  firmware starting there; on older firmware the GSP subscribe in this
+  repo won't get a response. Check/update via the Movesense Showcase app.
+  MD's certified firmware line is gated behind Movesense's medical
+  software repository (request access via medical@movesense.com) rather
+  than being publicly downloadable like the non-medical HR+/HR2/Flash line.
+- Python 3.10+, and a machine with BLE (macOS, Linux, or Windows).
+
+</details>
+
+<details>
+<summary><b>Setup in full — scanning, .env, running the tests</b></summary>
+
+```bash
+cd backend
+pip install -r requirements.txt
+
+python scan.py                                    # find your sensor's BLE address
+cp .env.example .env                              # then edit .env with your address
+uvicorn main:app --reload
+```
+
+Then open `frontend/index.html` in a browser (or serve it with any static
+file server). It connects to `ws://localhost:8000/ws`.
+
+To run the tests:
+
+```bash
+python -m unittest discover backend
+```
+
+</details>
+
+<details>
+<summary><b>Platform notes — macOS Bluetooth permissions, Linux, editors</b></summary>
 
 - `bleak` needs macOS, Linux, or Windows with BLE support. On Linux,
   stale GATT caching can cause `connect()` to hang — see bleak's
@@ -360,3 +431,39 @@ catches known patterns, not custom ones like a bare device address, so
     process. If VS Code's integrated terminal runs it, macOS will ask
     for *VS Code's* Bluetooth permission specifically — separate from
     any permission you already granted Terminal.app.
+
+</details>
+
+<details>
+<summary><b>References — specs and sources this was built against</b></summary>
+
+- Movesense MD Developer Kit spec — https://www.movesense.com/product/movesense-md-developer-kit-mdr/
+- GATT SensorData Protocol (GSP) spec — https://www.movesense.com/docs/esw/gatt_sensordata_protocol/
+- Movesense sample apps incl. `gatt_sensordata_app` + its Python client (parses ECG/IMU9 from SBEM) — https://www.movesense.com/docs/esw/sample_applications/
+- Movesense system/mobile overview (Whiteboard vs GSP) — https://www.movesense.com/docs/system/system_overview/ , https://www.movesense.com/docs/mobile/mobile_sw_overview/
+- Firmware 2.3.0 / 2.3.1 release notes (GSP becomes default firmware) — https://www.movesense.com/news/2024/12/movesense-firmware-update-2-3-0-a-perfect-holiday-gift-for-developers-and-researchers/ , https://www.movesense.com/news/2025/06/movesense-sensor-firmware-2-3-1-released-a-major-upgrade-for-medical-use/
+- Movesense's official Python Datalogger Tool (also decodes SBEM, for flash recordings) — https://bitbucket.org/movesense/python-datalogger-tool
+- sensein/movesense-py, a fork/extension of the above, including `docs/movesense-api.md` (Whiteboard schemas + the ECG LSB→mV conversion factor used here) — https://github.com/sensein/movesense-py
+- Movesense news post cataloguing these official tools — https://www.movesense.com/news/2025/11/recording-data-with-movesense-sensors-five-free-tools-to-get-you-started/
+- bleak (BLE library) docs — https://bleak.readthedocs.io/ , https://github.com/hbldh/bleak
+- Bluetooth Heart Rate Service measurement format, corroborating source — https://blefyi.com/guide/python-bleak/
+- Bluetooth SIG Heart Rate Service spec (RR-Interval field, used for the HRV/SDNN feature) — https://www.bluetooth.com/wp-content/uploads/Files/Specification/HTML/HRS_v1.0/out/en/index-en.html
+- FastAPI lifespan events (pattern used in `main.py`) — https://fastapi.tiangolo.com/advanced/events/
+
+</details>
+
+
+<!--*Live capture from the dashboard: heart rate, HRV and skin temperature
+across the top, with the decoded ECG waveform and accelerometer axes
+streaming below.*-->
+
+<!--To replace this with a live GIF: wear the sensor, run the app,
+screen-record ~15 seconds of the numbers and charts updating live
+(QuickTime's screen recording on macOS works fine), then convert:-->
+
+<!--```bash
+ffmpeg -i demo.mov -vf "fps=12,scale=800:-1:flags=lanczos" -loop 0 docs/demo.gif
+```-->
+
+<!--Drop the result at `docs/demo.gif` and swap the `<img>` tag above for it.-->
+
