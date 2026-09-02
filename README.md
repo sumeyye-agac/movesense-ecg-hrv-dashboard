@@ -163,10 +163,17 @@ python -m unittest discover backend
 
 ## Recording
 
-The dashboard's **Record** button captures a session and hands it back as
-a ZIP: one CSV per stream plus a `meta.json`. The gear beside it picks
-sample rates, which streams to include, and a free-text label that ends
-up in both the filename and the metadata.
+A bar across the top of the dashboard holds everything a capture needs —
+sample rates, which streams to include, a free-text label, and the
+**Record** button. Nothing is behind a menu; the settings lock while a
+recording runs, because changing a rate means resubscribing the stream
+and would tear a hole in the data. Stopping hands back a ZIP: one CSV
+per stream plus a `meta.json`.
+
+Reloading the page mid-recording is safe. The dashboard asks the backend
+what it is doing on load and adopts a running capture — button, elapsed
+time, label and all — rather than coming back looking idle while the
+recording it can no longer stop carries on.
 
 Sample rates deserve a warning. GSP has no GET verb, so there is no way
 to ask the sensor which rates it supports, and subscribing at an
@@ -175,6 +182,11 @@ a recording therefore resubscribes, waits for packets to actually
 arrive, and refuses to start if none do — restoring the previous working
 rate rather than leaving the dashboard dead. Ten minutes of silently
 empty recording is a worse outcome than being told up front.
+
+Recordings are buffered in memory and capped at two million samples per
+stream, about four hours of 125 Hz ECG or an hour at 500 Hz. On reaching
+the ceiling a stream stops early and says so in the warnings; running out
+of memory instead would take the whole capture with it.
 
 Saving uses the browser's native save dialog
 (`window.showSaveFilePicker`) so you choose the folder and name. That API
@@ -215,7 +227,11 @@ instead.
 accurate spacing but is relative to its boot; the host's wall clock is
 absolute but carries BLE batching jitter. Rather than pick one:
 
-- `t_s` — seconds since the recording started. Convenience axis.
+- `t_s` — seconds since the recording started. Convenience axis. The very
+  first row can be a few milliseconds negative: the streams share one
+  device clock, whichever packet lands first anchors it, and another
+  stream's packet may carry an earlier timestamp because it was sampled
+  just before you pressed Record and only delivered just after.
 - `t_device_ms` — the sensor's own monotonic clock, uint32 wraps undone.
 - `t_unix` — absolute time derived from the device clock, anchored to the
   host clock once at the first packet. **Use this one for analysis.**
@@ -225,6 +241,13 @@ absolute but carries BLE batching jitter. Rather than pick one:
 `meta.json` records the anchor, the clock drift measured at stop, and a
 count of packets that didn't follow on from their predecessor — a
 non-zero count means packets were dropped and the timeline has holes.
+
+If the sensor loses power mid-recording its clock restarts near zero.
+That is a small backward jump, not the ~2^32 one a uint32 wrap produces,
+and the two are handled differently: a wrap is added back, a restart
+re-anchors the timeline and is counted in `clock_restarts`. Treating a
+restart as a wrap would date every later sample an hour before the
+recording began, with nothing to show it had happened.
 
 Heart rate is the exception the columns admit to: the standard Bluetooth
 Heart Rate Service carries no device timestamp at all, so `t_device_ms`
@@ -250,6 +273,13 @@ is `MOVESENSE_ADDRESS` in `.env`, and
 that's not sensitive (it's a BLE address/UUID, not a credential) — it's
 excluded from git via `.gitignore` mainly because it's local config, not
 because it's dangerous if it leaked.
+
+The backend still has no authentication, so keep it on localhost. It does
+restrict CORS to local origins rather than allowing everything: the
+recording endpoints start and stop captures and re-subscribe the sensor
+at a different sample rate, and any page you have open can reach a server
+on your own loopback address, so `*` would let an unrelated site drive
+your hardware.
 
 If you add real credentials later (a cloud API key for ECG analysis,
 etc.), the same pattern applies: put them in `.env`, never in source, and

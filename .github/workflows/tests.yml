@@ -1,0 +1,27 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: pip install -r backend/requirements.txt pyflakes
+
+      # The decoders and the recording exporter are pure functions over
+      # bytes and packet lists, so they run anywhere - no sensor, no
+      # Bluetooth adapter, no BlueZ daemon.
+      - run: python -m unittest discover backend -v
+
+      - run: python -m pyflakes backend
