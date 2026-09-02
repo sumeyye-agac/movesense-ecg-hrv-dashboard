@@ -5,10 +5,10 @@ Two data paths, handled independently:
 
 - Heart rate over the standard Bluetooth Heart Rate Service (0x180D /
   0x2A37). Arrives pre-decoded, no vendor protocol involved.
-- ECG and IMU9 (accelerometer + gyroscope + magnetometer) over
-  Movesense's own GSP protocol (spec:
-  movesense.com/docs/esw/gatt_sensordata_protocol). Both ride the same
-  GSP notify characteristic, distinguished by reference code.
+- ECG, IMU9 (accelerometer + gyroscope + magnetometer) and temperature
+  over Movesense's own GSP protocol (spec:
+  movesense.com/docs/esw/gatt_sensordata_protocol). All three ride the
+  same GSP notify characteristic, distinguished by reference code.
 
 Decoding: GSP hands back each measurement as a small binary payload.
 Movesense doesn't publish its exact byte layout as a written spec, but
@@ -51,8 +51,17 @@ CMD_UNSUBSCRIBE = 2
 ECG_SUBSCRIBE_REF = 42
 IMU_SUBSCRIBE_REF = 43
 TEMP_SUBSCRIBE_REF = 44
-IMU_SAMPLE_RATE_HZ = 52   # one of Movesense's fixed rates: 13/26/52/104/208/416/833/1666
-ECG_SAMPLE_RATE_HZ = 125  # confirmed valid for this sensor via /Meas/ECG/Info's AvailableSampleRates
+DEFAULT_IMU_SAMPLE_RATE_HZ = 52
+DEFAULT_ECG_SAMPLE_RATE_HZ = 125  # confirmed valid for this sensor via /Meas/ECG/Info's AvailableSampleRates
+
+# Rates Movesense documents for these resources. GSP has no GET verb -
+# only HELLO/SUBSCRIBE/UNSUBSCRIBE - so there is no way to ask the sensor
+# what it actually supports; these lists come from the API reference, not
+# from the device. Subscribing at an unsupported rate fails *silently*:
+# the subscribe simply never produces data. Callers must therefore verify
+# that packets actually arrive rather than trusting the subscribe.
+VALID_ECG_RATES_HZ = (125, 128, 200, 250, 256, 500)
+VALID_IMU_RATES_HZ = (13, 26, 52, 104, 208, 416)
 
 # Raw ECG integer -> millivolts, from Movesense's own API reference docs.
 ECG_LSB_TO_MV = 0.000381469726563
@@ -86,16 +95,19 @@ def _decode_imu9(payload: bytes):
     return timestamp, acc, gyro, magn
 
 
-def _decode_temp(payload: bytes) -> float:
-    """Wire order is [float32 Kelvin][uint32 timestamp] - the *reverse* of
-    the Whiteboard schema's field listing order (Timestamp, Measurement),
-    and also reversed from ECG/IMU's timestamp-first layout. Confirmed on
-    real hardware: this ordering gives ~33.8 C for a chest-worn sensor
-    (plausible skin-adjacent temp); the timestamp-first reading gives 0 K
-    (absolute zero, impossible), which is how the swap was caught.
+def _decode_temp(payload: bytes):
+    """[float32 Kelvin][uint32 timestamp_ms] -> (timestamp_ms, celsius).
+
+    Wire order is the *reverse* of the Whiteboard schema's field listing
+    order (Timestamp, Measurement), and also reversed from ECG/IMU's
+    timestamp-first layout. Confirmed on real hardware: this ordering
+    gives ~33.8 C for a chest-worn sensor (plausible skin-adjacent temp);
+    the timestamp-first reading gives 0 K (absolute zero, impossible),
+    which is how the swap was caught.
     """
     kelvin = struct.unpack_from("<f", payload, 0)[0]
-    return kelvin - 273.15
+    timestamp = struct.unpack_from("<I", payload, 4)[0]
+    return timestamp, kelvin - 273.15
 
 
 class MovesenseBLE:
@@ -105,11 +117,15 @@ class MovesenseBLE:
         on_hr: Optional[Callable[[int, list], None]] = None,
         on_ecg: Optional[Callable[[int, list], None]] = None,
         on_imu: Optional[Callable[[int, list, list, list], None]] = None,
-        on_temp: Optional[Callable[[float], None]] = None,
+        on_temp: Optional[Callable[[int, float], None]] = None,
         on_disconnect: Optional[Callable[[], None]] = None,
+        ecg_hz: int = DEFAULT_ECG_SAMPLE_RATE_HZ,
+        imu_hz: int = DEFAULT_IMU_SAMPLE_RATE_HZ,
     ):
         self.address = address
         self.client: Optional[BleakClient] = None
+        self.ecg_hz = ecg_hz
+        self.imu_hz = imu_hz
         self.on_hr = on_hr
         self.on_ecg = on_ecg
         self.on_imu = on_imu
@@ -146,12 +162,46 @@ class MovesenseBLE:
             # never arrive at all (observed this with ref=44 previously).
             await self._gsp_subscribe("/Meas/Temp", ref=TEMP_SUBSCRIBE_REF)
             await asyncio.sleep(0.5)
-            await self._gsp_subscribe(f"/Meas/ECG/{ECG_SAMPLE_RATE_HZ}/mV", ref=ECG_SUBSCRIBE_REF)
+            await self._gsp_subscribe(f"/Meas/ECG/{self.ecg_hz}/mV", ref=ECG_SUBSCRIBE_REF)
             await asyncio.sleep(0.5)
-            await self._gsp_subscribe(f"/Meas/IMU9/{IMU_SAMPLE_RATE_HZ}", ref=IMU_SUBSCRIBE_REF)
+            await self._gsp_subscribe(f"/Meas/IMU9/{self.imu_hz}", ref=IMU_SUBSCRIBE_REF)
             self.gsp_available = True
         except Exception as e:
             print(f"GSP not available on this sensor (likely firmware < 2.3.0): {e}")
+
+    async def set_rates(self, ecg_hz: int, imu_hz: int):
+        """Re-subscribe ECG and IMU9 at new sample rates, live.
+
+        GSP has no "change the rate" command, so the only way is to drop
+        both subscriptions and take them out again at the new paths. The
+        pacing here mirrors connect(): unsubscribing and resubscribing
+        back-to-back on a busy notification channel is exactly the
+        situation where acks were seen to go missing.
+
+        The subscribe itself proves nothing - an unsupported rate is
+        accepted and then simply never delivers. The caller is
+        responsible for confirming that packets actually arrive.
+        """
+        if ecg_hz not in VALID_ECG_RATES_HZ:
+            raise ValueError(f"ECG rate {ecg_hz} Hz not in {VALID_ECG_RATES_HZ}")
+        if imu_hz not in VALID_IMU_RATES_HZ:
+            raise ValueError(f"IMU9 rate {imu_hz} Hz not in {VALID_IMU_RATES_HZ}")
+        if not self.gsp_available:
+            raise RuntimeError("GSP not available on this sensor - cannot change rates")
+
+        if (ecg_hz, imu_hz) == (self.ecg_hz, self.imu_hz):
+            return
+
+        for ref in (ECG_SUBSCRIBE_REF, IMU_SUBSCRIBE_REF):
+            await self._gsp_send(CMD_UNSUBSCRIBE, ref=ref, data=b"")
+            await asyncio.sleep(0.3)
+
+        await self._gsp_subscribe(f"/Meas/ECG/{ecg_hz}/mV", ref=ECG_SUBSCRIBE_REF)
+        await asyncio.sleep(0.5)
+        await self._gsp_subscribe(f"/Meas/IMU9/{imu_hz}", ref=IMU_SUBSCRIBE_REF)
+
+        self.ecg_hz = ecg_hz
+        self.imu_hz = imu_hz
 
     def _handle_unexpected_disconnect(self, _client):
         print("Sensor connection dropped unexpectedly")
@@ -235,9 +285,9 @@ class MovesenseBLE:
                     if self.on_imu:
                         self.on_imu(timestamp, acc, gyro, magn)
                 elif ref == TEMP_SUBSCRIBE_REF:
-                    celsius = _decode_temp(payload)
+                    timestamp, celsius = _decode_temp(payload)
                     if self.on_temp:
-                        self.on_temp(celsius)
+                        self.on_temp(timestamp, celsius)
             except (struct.error, IndexError) as e:
                 print(f"[GSP] failed to decode payload for ref={ref}: {e}")
 
