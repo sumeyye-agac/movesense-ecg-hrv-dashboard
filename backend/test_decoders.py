@@ -289,7 +289,36 @@ class RecorderTimebaseTest(unittest.TestCase):
         rec.stop()
 
         with zipfile.ZipFile(io.BytesIO(rec.get_finished(rid)["zip"])) as z:
-            self.assertEqual(sorted(z.namelist()), ["ecg.csv", "meta.json"])
+            self.assertEqual(sorted(z.namelist()), ["README.md", "ecg.csv", "meta.json"])
+
+    def test_readme_describes_this_particular_recording(self):
+        # The point of generating it rather than shipping a static file is
+        # that it carries this recording's own numbers and caveats.
+        rec = Recorder()
+        rid = rec.start(streams=["ecg", "hr"], label="resting", ecg_hz=125, imu_hz=52,
+                        device_address="AA:BB:CC")
+        for k in range(4):
+            rec.record_ecg(1000 + k * 32, [0.1] * 4, recv_unix=time.time() + k * 0.032)
+        rec.record_hr(70, 41.5, [857.0], recv_unix=time.time())
+        summary = rec.stop()
+
+        with zipfile.ZipFile(io.BytesIO(rec.get_finished(rid)["zip"])) as z:
+            # Opening the archive should put this in front of the reader.
+            self.assertEqual(z.namelist()[0], "README.md")
+            readme = z.read("README.md").decode()
+
+        self.assertIn("resting", readme)
+        self.assertIn("AA:BB:CC", readme)
+        self.assertIn("`ecg.csv`", readme)
+        self.assertIn("`hr.csv`", readme)
+        # Streams that were not recorded have no file and no row in the table.
+        self.assertNotIn("`imu.csv`", readme)
+        self.assertNotIn("`temp.csv`", readme)
+        # The caveats a reader needs before trusting the numbers.
+        self.assertIn("t_unix", readme)
+        self.assertIn("uncalibrated", readme)
+        for warning in summary["warnings"]:
+            self.assertIn(warning, readme)
 
     def test_empty_stream_produces_a_warning_not_a_silent_file(self):
         rec = Recorder()

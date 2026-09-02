@@ -213,6 +213,12 @@ them all. `t_device_ms` is empty where the stream has no device clock.
 | `hr.csv` | one per notification | `bpm`, `sdnn_ms` |
 | `rr.csv` | one per beat | `rr_ms`, `index_in_packet` |
 
+Alongside them the ZIP carries a `meta.json` and a `README.md`, both written
+per recording. They hold the same facts for different readers: `meta.json`
+is what a loader parses — the measured rates, the clock anchor and drift,
+sample counts — while the README is what a person opening the archive
+months later reads, with this recording's own numbers and warnings in it.
+
 Two things about the timestamps are worth understanding before using
 this data, because both are easy to get wrong silently:
 

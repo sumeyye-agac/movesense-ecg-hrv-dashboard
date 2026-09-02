@@ -125,6 +125,7 @@ class Recorder:
         self._imu_samples = 0
 
         self._gaps: list[dict] = []
+        self._summary_warnings: list[str] = []
         self._clock_restarts = 0
         self._truncated: set[str] = set()
         self._last_device_row = None  # (device_ms, recv_unix) for drift at stop
@@ -162,6 +163,7 @@ class Recorder:
         # lock. Holding it here would stall bleak's callback thread for
         # as long as the export takes.
         summary = self._summary()
+        self._summary_warnings = summary["warnings"]
         self._finished[self.recording_id] = {
             "summary": summary,
             "zip": self._build_zip(),
@@ -571,9 +573,144 @@ class Recorder:
             },
         }
 
+    def _readme_md(self) -> str:
+        """A human-readable companion to meta.json, written per recording.
+
+        meta.json is what a loader parses; this is what a person opening
+        the ZIP months later reads. Both carry the same facts because the
+        two audiences need the same information in different shapes -
+        dropping either one costs somebody something.
+        """
+        started = datetime.fromtimestamp(self.started_unix).strftime("%Y-%m-%d %H:%M:%S")
+        title = f'Movesense recording - "{self.label}"' if self.label else "Movesense recording"
+
+        lines = [
+            f"# {title}",
+            "",
+            f"Captured {started} (local time), {self._format_duration()} long, from Movesense "
+            f"sensor `{self.device_address or 'unknown'}`.",
+            "",
+        ]
+
+        if self._summary_warnings:
+            lines += ["## Read this first", ""]
+            lines += [f"- {w}" for w in self._summary_warnings]
+            lines += [""]
+
+        lines += [
+            "## What is in here",
+            "",
+            "| file | rows | contents |",
+            "|---|---|---|",
+        ]
+        descriptions = self._file_descriptions()
+        for filename, rows, description in descriptions:
+            lines.append(f"| `{filename}` | {rows} | {description} |")
+        lines += [
+            "| `meta.json` | - | the same facts as this file, machine-readable |",
+            "",
+            "## The time columns",
+            "",
+            "Every CSV starts with the same four columns, so one loader reads them all.",
+            "",
+            "| column | meaning |",
+            "|---|---|",
+            "| `t_s` | seconds since the recording started - the axis to plot against |",
+            "| `t_device_ms` | the sensor's own clock, in ms, with uint32 wraps undone |",
+            "| `t_unix` | absolute time, derived from the device clock - **use this for analysis** |",
+            "| `t_recv_unix` | when the Bluetooth packet reached the computer - diagnostic only |",
+            "",
+            "Two clocks are involved and neither alone is sufficient. The sensor's clock",
+            "spaces samples accurately but counts from its own power-on; the computer's",
+            "clock is absolute but is only stamped when a packet arrives, and Bluetooth",
+            "delivers ECG and IMU9 in batches of many samples at once. `t_unix` combines",
+            "them: the sensor's spacing, anchored to the computer's clock once at the",
+            "start. `t_recv_unix` is kept so the gap between the two - the Bluetooth",
+            "delivery latency - stays visible instead of being baked invisibly into the",
+            "timeline. Samples from one packet share a `t_recv_unix`; that is expected.",
+            "",
+            "## Loading it",
+            "",
+            "```python",
+            "import pandas as pd",
+            "",
+            'ecg = pd.read_csv("ecg.csv")',
+            'ecg["t_unix"].diff().describe()   # sample spacing, should be near-constant',
+            "```",
+            "",
+            "## Things to know before trusting it",
+            "",
+            "- **Sample spacing follows what the sensor actually delivered**, not what was",
+            "  asked for. The two can differ - IMU9 subscribed at 52 Hz tends to deliver",
+            "  about 54 - so `meta.json` records `rate_hz` and `measured_rate_hz`",
+            "  separately for each stream.",
+            "- **The first row's `t_s` can be a few milliseconds negative.** The streams",
+            "  share one device clock and whichever packet arrives first anchors it;",
+            "  another stream's packet may carry an earlier timestamp because it was",
+            "  sampled just before recording began and only delivered just after.",
+            "- **Magnetometer values are raw and uncalibrated.** They carry a hard-iron",
+            "  offset, so their magnitude is not Earth's field strength. Calibrate by",
+            "  rotating the sensor through many orientations and fitting a sphere.",
+            "- **`rr.csv` holds inter-beat intervals in delivery order, not beat times.**",
+            "  Absolute beat times are deliberately not reconstructed here: one dropped",
+            "  notification would make a cumulative sum silently wrong.",
+            "- **`hr.csv` and `rr.csv` have an empty `t_device_ms`.** They come over the",
+            "  standard Bluetooth Heart Rate Service, which carries no device timestamp",
+            "  at all, so `t_unix` there can only be arrival time.",
+            "- **`sdnn_ms` is unfiltered** - the standard deviation of raw RR intervals",
+            "  over a rolling window, with no ectopic-beat correction. For real HRV work,",
+            "  compute it yourself from `rr.csv`.",
+            "",
+            "Written by the Movesense Live Dashboard.",
+            "",
+        ]
+        return "\n".join(lines)
+
+    def _format_duration(self) -> str:
+        seconds = self.stopped_unix - self.started_unix
+        if seconds < 90:
+            return f"{seconds:.1f} s"
+        return f"{int(seconds // 60)} min {int(seconds % 60)} s"
+
+    def _file_descriptions(self):
+        """(filename, row count, prose) for each CSV actually written."""
+        counts = self._counts()
+        out = []
+        if "ecg" in self.streams:
+            measured = self._measured_hz(self._ecg, self.ecg_hz)
+            out.append((
+                "ecg.csv", f"{counts.get('ecg', 0):,}",
+                f"single-lead ECG in millivolts, one row per sample, "
+                f"{self.ecg_hz} Hz requested / {measured or '-'} Hz delivered",
+            ))
+        if "imu" in self.streams:
+            measured = self._measured_hz(self._imu, self.imu_hz)
+            out.append((
+                "imu.csv", f"{counts.get('imu', 0):,}",
+                f"accelerometer (m/s²), gyroscope (°/s) and magnetometer (µT), "
+                f"three axes each, {self.imu_hz} Hz requested / {measured or '-'} Hz delivered",
+            ))
+        if "hr" in self.streams:
+            out.append((
+                "hr.csv", f"{counts.get('hr', 0):,}",
+                "heart rate in bpm plus a rolling unfiltered SDNN, about one row per second",
+            ))
+            out.append((
+                "rr.csv", f"{counts.get('rr', 0):,}",
+                "inter-beat (RR) intervals in ms, one row per beat",
+            ))
+        if "temp" in self.streams:
+            out.append((
+                "temp.csv", f"{counts.get('temp', 0):,}",
+                "skin-side temperature in °C - the sensor only reports it when it changes",
+            ))
+        return out
+
     def _build_zip(self) -> bytes:
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            # First in the archive so it is the first thing seen on opening it.
+            z.writestr("README.md", self._readme_md())
             if "ecg" in self.streams:
                 z.writestr("ecg.csv", self._ecg_csv())
             if "imu" in self.streams:
