@@ -12,12 +12,13 @@ ECG, IMU9, and temperature arrive as small binary payloads that
 Movesense doesn't publish a written byte-layout spec for. Rather than
 guess, the layout here was reverse-engineered from live captures and
 checked against physics before trusting it: decoded accelerometer
-samples read ~9.8 m/s² at rest (Earth's gravity) and magnetometer
-samples land in the ~25–65 µT range (Earth's field); decoded ECG
-samples, scaled by Movesense's own published LSB→mV conversion factor,
-produce a smooth, physiologically plausible signal; decoded
-temperature reads ~34 °C against skin, and a byte-order swap caught
-during verification would otherwise have silently reported 0 Kelvin.
+samples read ~9.8 m/s² at rest (Earth's gravity); decoded ECG samples,
+scaled by Movesense's own published LSB→mV conversion factor, produce a
+smooth, physiologically plausible signal at exactly the subscribed rate;
+decoded temperature reads ~34 °C against skin, and a byte-order swap
+caught during verification would otherwise have silently reported 0
+Kelvin. The magnetometer is the one channel still unconfirmed — see
+below for why its obvious check doesn't actually work.
 See [How the byte format was verified](#how-the-byte-format-was-verified)
 for the actual method, and [Architecture](#architecture) for the
 full picture.
@@ -105,8 +106,18 @@ project:
    - Accelerometer: `sqrt(x²+y²+z²)` should read ~9.8 m/s² when the
      sensor is roughly stationary (Earth's gravity). It did, across
      multiple samples.
-   - Magnetometer: values should fall in Earth's field range
-     (~25–65 µT). They did.
+   - Magnetometer: **not verified.** The obvious check — magnitude
+     should sit in Earth's field range, ~25–65 µT — does not work on a
+     stationary sensor. An uncalibrated MEMS magnetometer carries a
+     hard-iron offset, so one orientation's magnitude measures that
+     offset as much as the field; establishing the true field strength
+     means rotating through many orientations and fitting a sphere,
+     whose radius is the answer. Measured over a real recording the
+     magnitude sits around 11 µT, tightly clustered (σ ≈ 1.2) — stable
+     and structured rather than garbage, so the block boundaries are
+     almost certainly right, but well under Earth's field and not
+     something a single resting posture can confirm either way. Treat
+     the magnetometer columns as raw uncalibrated output.
    - ECG: raw int16 samples × Movesense's published conversion factor
      (1 LSB = 0.000381469726563 mV) produced a smooth, continuous
      signal — not noise, not NaN, not saturated.
@@ -141,6 +152,91 @@ uvicorn main:app --reload
 
 Then open `frontend/index.html` in a browser (or serve it with any static
 file server). It connects to `ws://localhost:8000/ws`.
+
+To run the tests:
+
+```bash
+python -m unittest discover backend
+```
+
+## Recording
+
+The dashboard's **Record** button captures a session and hands it back as
+a ZIP: one CSV per stream plus a `meta.json`. The gear beside it picks
+sample rates, which streams to include, and a free-text label that ends
+up in both the filename and the metadata.
+
+Sample rates deserve a warning. GSP has no GET verb, so there is no way
+to ask the sensor which rates it supports, and subscribing at an
+unsupported one is accepted and then silently delivers nothing. Starting
+a recording therefore resubscribes, waits for packets to actually
+arrive, and refuses to start if none do — restoring the previous working
+rate rather than leaving the dashboard dead. Ten minutes of silently
+empty recording is a worse outcome than being told up front.
+
+Saving uses the browser's native save dialog
+(`window.showSaveFilePicker`) so you choose the folder and name. That API
+is Chromium-only and wants a secure context, so **serve the frontend over
+HTTP rather than opening it as a `file://` URL** if you want the dialog:
+
+```bash
+python -m http.server 8080 --directory frontend
+```
+
+Elsewhere — Safari, Firefox — it falls back to an ordinary download and
+the dialog text says so.
+
+### CSV format
+
+Every CSV starts with the same four time columns, so one loader reads
+them all. `t_device_ms` is empty where the stream has no device clock.
+
+| file | rows | columns after the time block |
+|---|---|---|
+| `ecg.csv` | one per sample | `ecg_mv` |
+| `imu.csv` | one per sample | `acc_x…z`, `gyro_x…z`, `magn_x…z` |
+| `temp.csv` | one per reading | `temp_c` |
+| `hr.csv` | one per notification | `bpm`, `sdnn_ms` |
+| `rr.csv` | one per beat | `rr_ms`, `index_in_packet` |
+
+Two things about the timestamps are worth understanding before using
+this data, because both are easy to get wrong silently:
+
+**Samples are spread within their packet.** BLE delivers ECG and IMU9 in
+batches — one device timestamp and roughly sixteen samples per packet.
+Stamping every sample in a packet with the packet's own time produces a
+staircase, which corrupts inter-beat intervals and anything else derived
+from sample spacing. Sample *i* is placed at `packet_timestamp + i/rate`
+instead.
+
+**There are two clocks, and both are kept.** The sensor's own clock has
+accurate spacing but is relative to its boot; the host's wall clock is
+absolute but carries BLE batching jitter. Rather than pick one:
+
+- `t_s` — seconds since the recording started. Convenience axis.
+- `t_device_ms` — the sensor's own monotonic clock, uint32 wraps undone.
+- `t_unix` — absolute time derived from the device clock, anchored to the
+  host clock once at the first packet. **Use this one for analysis.**
+- `t_recv_unix` — when the packet reached the host. Samples from one
+  packet share it, so the gap against `t_unix` is BLE latency.
+
+`meta.json` records the anchor, the clock drift measured at stop, and a
+count of packets that didn't follow on from their predecessor — a
+non-zero count means packets were dropped and the timeline has holes.
+
+Heart rate is the exception the columns admit to: the standard Bluetooth
+Heart Rate Service carries no device timestamp at all, so `t_device_ms`
+is empty there and `t_unix` can only be arrival time. Its raw
+RR-intervals get their own file, since they, not the derived SDNN, are
+what HRV work actually wants. Absolute beat times are deliberately *not*
+reconstructed from them — a single dropped notification would make a
+cumulative sum silently wrong, so that judgement is left to you.
+
+```python
+import pandas as pd
+ecg = pd.read_csv("ecg.csv")
+ecg["t_unix"].diff().describe()   # should sit at 1/rate
+```
 
 ## Putting this on GitHub
 

@@ -8,7 +8,10 @@ decisions that the live dashboard never had to care about:
    ~16 samples. Stamping every sample in a packet with the packet's
    arrival time produces a staircase, which corrupts inter-beat
    intervals and anything else derived from sample spacing. Sample i in a
-   packet is therefore placed at `packet_timestamp + i / rate`.
+   packet is placed at `packet_timestamp + i * step` instead, where step
+   is measured from the gap to the *next* packet rather than assumed from
+   the rate we subscribed at - those two disagree in practice (IMU9 asked
+   for at 52 Hz delivers about 54).
 
 2) **Two clocks, kept separate.** The sensor's own monotonic clock has
    accurate spacing but is relative to device boot; the host's wall clock
@@ -36,6 +39,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import statistics
 import threading
 import time
 import uuid
@@ -274,6 +278,14 @@ class Recorder:
                 )
         if self._gaps:
             warnings.append(f"{len(self._gaps)} connection interruption(s) during recording.")
+        for stream, packets, asked in (("ECG", self._ecg, self.ecg_hz), ("IMU9", self._imu, self.imu_hz)):
+            measured = self._measured_hz(packets, asked)
+            if measured and asked and abs(measured - asked) / asked > 0.01:
+                warnings.append(
+                    f"{stream} was subscribed at {asked} Hz but the sensor delivered "
+                    f"{measured} Hz. Sample spacing follows the measured rate; "
+                    f"meta.json records both."
+                )
         for stream, n in self._anomalies.items():
             if n:
                 warnings.append(
@@ -308,12 +320,46 @@ class Recorder:
             _fmt(recv_unix, 6),
         ]
 
+    def _sample_steps(self, packets, nominal_hz):
+        """Per-packet spacing between samples, in milliseconds.
+
+        The rate we subscribed at is not necessarily the rate the sensor
+        delivers. Asking for IMU9 at 52 Hz was observed producing four
+        samples every 74 ms - about 54 Hz. Spacing samples on the nominal
+        rate then makes each packet's samples drift ahead of the truth and
+        snap back at the next packet's timestamp: a sawtooth in a column
+        whose entire purpose is even spacing.
+
+        Consecutive packet timestamps measure the real interval directly,
+        so use those. The last packet has no successor, so it falls back
+        to the median of the measured steps.
+        """
+        fallback = 1000.0 / nominal_hz if nominal_hz else 0.0
+        if not packets:
+            return []
+
+        steps = []
+        for index, packet in enumerate(packets):
+            count = len(packet[2])
+            if index + 1 < len(packets) and count:
+                steps.append((packets[index + 1][0] - packet[0]) / count)
+            else:
+                steps.append(None)
+
+        measured = [s for s in steps if s is not None]
+        tail = statistics.median(measured) if measured else fallback
+        return [tail if s is None else s for s in steps]
+
+    def _measured_hz(self, packets, nominal_hz):
+        steps = [s for s in self._sample_steps(packets, nominal_hz) if s]
+        return round(1000.0 / statistics.median(steps), 3) if steps else None
+
     def _ecg_csv(self):
         out = io.StringIO()
         w = csv.writer(out)
         w.writerow(_TIME_COLUMNS + ["ecg_mv"])
-        step = 1000.0 / self.ecg_hz if self.ecg_hz else 0.0
-        for device_ms, recv_unix, samples in self._ecg:
+        steps = self._sample_steps(self._ecg, self.ecg_hz)
+        for (device_ms, recv_unix, samples), step in zip(self._ecg, steps):
             for i, mv in enumerate(samples):
                 w.writerow(self._row_times(device_ms + i * step, recv_unix) + [_fmt(mv, 6)])
         return out.getvalue()
@@ -326,8 +372,8 @@ class Recorder:
             "gyro_x", "gyro_y", "gyro_z",
             "magn_x", "magn_y", "magn_z",
         ])
-        step = 1000.0 / self.imu_hz if self.imu_hz else 0.0
-        for device_ms, recv_unix, acc, gyro, magn in self._imu:
+        steps = self._sample_steps(self._imu, self.imu_hz)
+        for (device_ms, recv_unix, acc, gyro, magn), step in zip(self._imu, steps):
             for i in range(len(acc)):
                 values = list(acc[i]) + list(gyro[i]) + list(magn[i])
                 w.writerow(
@@ -374,9 +420,19 @@ class Recorder:
         files = {}
         counts = self._counts()
         if "ecg" in self.streams:
-            files["ecg"] = {"file": "ecg.csv", "rate_hz": self.ecg_hz, "samples": counts.get("ecg", 0)}
+            files["ecg"] = {
+                "file": "ecg.csv",
+                "rate_hz": self.ecg_hz,
+                "measured_rate_hz": self._measured_hz(self._ecg, self.ecg_hz),
+                "samples": counts.get("ecg", 0),
+            }
         if "imu" in self.streams:
-            files["imu"] = {"file": "imu.csv", "rate_hz": self.imu_hz, "samples": counts.get("imu", 0)}
+            files["imu"] = {
+                "file": "imu.csv",
+                "rate_hz": self.imu_hz,
+                "measured_rate_hz": self._measured_hz(self._imu, self.imu_hz),
+                "samples": counts.get("imu", 0),
+            }
         if "temp" in self.streams:
             files["temp"] = {"file": "temp.csv", "rate_hz": None, "samples": counts.get("temp", 0)}
         if "hr" in self.streams:
@@ -400,6 +456,10 @@ class Recorder:
             },
             "ecg_lsb_to_mv": 0.000381469726563,
             "column_notes": {
+                "rate_hz": "the rate we subscribed at",
+                "measured_rate_hz": "the rate the sensor actually delivered, taken from "
+                                    "packet timestamps - sample spacing follows this, not "
+                                    "rate_hz, because the two do not always agree",
                 "t_s": "seconds since the recording started",
                 "t_device_ms": "the sensor's own monotonic clock, uint32 wraps unwrapped; "
                                "empty for hr/rr, which have no device clock",

@@ -80,16 +80,22 @@ class DecodeImu9Test(unittest.TestCase):
             self.assertGreater(magnitude, 8.5)
             self.assertLess(magnitude, 11.0)
 
-    def test_magnetometer_lands_in_earth_field_range(self):
-        acc = [(0.0, 0.0, 9.81)]
-        gyro = [(0.0, 0.0, 0.0)]
-        magn = [(21.0, -14.0, 41.2)]
+    def test_magnetometer_block_round_trips(self):
+        # Deliberately NOT an Earth's-field magnitude check. Asserting that
+        # synthetic values chosen to be in range come back in range proves
+        # nothing, and on real hardware the magnitude reads ~11 uT anyway:
+        # an uncalibrated magnetometer's hard-iron offset means a single
+        # orientation cannot measure the field. What is worth pinning down
+        # is that the third block is read at the right offset and scale.
+        acc = [(0.0, 0.0, 9.81)] * 3
+        gyro = [(0.0, 0.0, 0.0)] * 3
+        magn = [(8.52, -4.92, -5.43), (7.59, -6.68, -6.42), (8.87, -0.76, -3.14)]
         _, _, _, got_magn = _decode_imu9(build_imu9_payload(0, acc, gyro, magn))
 
-        x, y, z = got_magn[0]
-        magnitude = math.sqrt(x * x + y * y + z * z)
-        self.assertGreater(magnitude, 25.0)
-        self.assertLess(magnitude, 65.0)
+        self.assertEqual(len(got_magn), 3)
+        for got, expected in zip(got_magn, magn):
+            for axis_got, axis_expected in zip(got, expected):
+                self.assertAlmostEqual(axis_got, axis_expected, places=5)
 
     def test_blocks_are_not_interleaved(self):
         # The three sensors arrive as three back-to-back blocks, not as
@@ -204,6 +210,25 @@ class RecorderTimebaseTest(unittest.TestCase):
         )
         self.assertEqual(meta["clock"]["timestamp_gap_anomalies"]["ecg"], 1)
         self.assertTrue(any("did not follow on" in w for w in summary["warnings"]))
+
+    def test_spacing_follows_the_delivered_rate_not_the_requested_one(self):
+        # Subscribing IMU9 at 52 Hz was observed delivering 4 samples every
+        # 74 ms - about 54 Hz. Spacing on the nominal 19.231 ms would drift
+        # each packet's samples ahead and snap them back at the next packet.
+        rec = Recorder()
+        rid = rec.start(streams=["imu"], label="", ecg_hz=125, imu_hz=52)
+        acc = [(0.0, 0.0, 9.81)] * 4
+        for k in range(4):
+            rec.record_imu(1000 + k * 74, acc, acc, acc, recv_unix=1_700_000_000.0 + k * 0.074)
+        summary = rec.stop()
+
+        rows = self._read_csv(rec, rid, "imu.csv")
+        times = [float(r["t_unix"]) for r in rows]
+        steps = [round(b - a, 6) for a, b in zip(times, times[1:])]
+
+        # 74 ms / 4 samples = 18.5 ms, evenly, across packet boundaries too.
+        self.assertEqual(set(steps), {0.0185})
+        self.assertTrue(any("delivered 54.054 Hz" in w for w in summary["warnings"]))
 
     def test_unselected_streams_are_not_written(self):
         rec = Recorder()

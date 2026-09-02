@@ -15,8 +15,11 @@ Movesense doesn't publish its exact byte layout as a written spec, but
 for these two paths it's been reverse-engineered here and verified
 against physics, not just "it parses without crashing":
   - IMU9 accelerometer samples decode to ~9.8 m/s^2 magnitude at rest
-    (Earth's gravity) and magnetometer samples land in the ~25-65 uT
-    range (Earth's field) - see _decode_imu9.
+    (Earth's gravity) - see _decode_imu9. The magnetometer block is
+    structurally sound (stable, correctly bounded values) but its
+    absolute scale is NOT verified: an uncalibrated magnetometer's
+    hard-iron offset means a stationary reading cannot be checked
+    against Earth's field. Treat those columns as raw output.
   - ECG samples (raw int16 LSBs) scaled by Movesense's own published
     conversion factor (1 LSB = 0.000381469726563 mV, from their API
     reference) produce a smooth, physiologically plausible signal -
