@@ -23,6 +23,11 @@
 
   * { box-sizing: border-box; }
 
+  /* The UA stylesheet's [hidden] rule is an author-stylesheet loser, so any
+     element we style with a display value (.modal-backdrop is flex) would
+     ignore the hidden attribute without this. */
+  [hidden] { display: none !important; }
+
   body {
     margin: 0;
     background: var(--bg);
@@ -197,6 +202,231 @@
   }
 
   .note a { color: var(--accent-dim); }
+
+  /* --- Recording --- */
+
+  .record-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+    margin-right: 14px;
+    padding-right: 14px;
+    border-right: 1px solid var(--panel-border);
+  }
+
+  .record-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font: inherit;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 7px;
+    padding: 7px 13px;
+    cursor: pointer;
+  }
+
+  .record-btn:hover:not(:disabled) { border-color: var(--text-dim); }
+  .record-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .record-btn .bullet {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #F2545B;
+    flex-shrink: 0;
+  }
+
+  .record-btn.recording {
+    border-color: #F2545B;
+    color: #F2545B;
+  }
+
+  .record-btn.recording .bullet {
+    border-radius: 1px;
+    animation: rec-pulse 1.4s ease-in-out infinite;
+  }
+
+  @keyframes rec-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
+
+  .rec-meta {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .icon-btn {
+    font: inherit;
+    font-size: 14px;
+    line-height: 1;
+    color: var(--text-dim);
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    border-radius: 7px;
+    padding: 8px 10px;
+    cursor: pointer;
+  }
+
+  .icon-btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+  .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .popover {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    z-index: 40;
+    width: 290px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 18px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    text-align: left;
+  }
+
+  .field { margin-bottom: 15px; }
+  .field:last-child { margin-bottom: 0; }
+
+  .field > label {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-dim);
+    margin-bottom: 7px;
+  }
+
+  .field select, .field input[type="text"] {
+    width: 100%;
+    font: inherit;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    padding: 7px 9px;
+  }
+
+  .checks { display: grid; gap: 7px; }
+
+  .checks label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .field-hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(6, 9, 12, 0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: 460px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55);
+  }
+
+  .modal h2 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 4px 0;
+  }
+
+  .modal .sub {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 18px;
+  }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 7px 16px;
+    font-size: 13px;
+    padding: 14px 0;
+    border-top: 1px solid var(--panel-border);
+    border-bottom: 1px solid var(--panel-border);
+    margin-bottom: 16px;
+  }
+
+  .summary-grid .k { color: var(--text-dim); }
+  .summary-grid .v { font-variant-numeric: tabular-nums; text-align: right; }
+
+  .warn-box {
+    background: rgba(255, 184, 77, 0.09);
+    border: 1px solid rgba(255, 184, 77, 0.3);
+    border-radius: 7px;
+    padding: 11px 13px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--warn);
+    margin-bottom: 16px;
+  }
+
+  .warn-box ul { margin: 0; padding-left: 17px; }
+
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 18px;
+  }
+
+  .btn {
+    font: inherit;
+    font-size: 13px;
+    border-radius: 7px;
+    padding: 8px 15px;
+    cursor: pointer;
+    border: 1px solid var(--panel-border);
+    background: transparent;
+    color: var(--text-dim);
+  }
+
+  .btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #06231B;
+    font-weight: 500;
+  }
+
+  .btn.primary:hover:not(:disabled) { background: #5BEDC0; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .form-error {
+    font-size: 12px;
+    color: #F2545B;
+    margin-top: 12px;
+    line-height: 1.5;
+  }
 </style>
 </head>
 <body>
@@ -207,12 +437,66 @@
     <div class="device" id="deviceAddress">connecting to backend&hellip;</div>
   </div>
   <div class="status">
+    <div class="record-controls">
+      <button class="record-btn" id="recordBtn" disabled>
+        <span class="bullet"></span><span id="recordBtnLabel">Record</span>
+      </button>
+      <span class="rec-meta" id="recMeta"></span>
+      <button class="icon-btn" id="settingsBtn" title="Recording settings" disabled>&#9881;</button>
+
+      <div class="popover" id="settingsPanel" hidden>
+        <div class="field">
+          <label for="ecgRate">ECG sample rate</label>
+          <select id="ecgRate"></select>
+        </div>
+        <div class="field">
+          <label for="imuRate">IMU9 sample rate</label>
+          <select id="imuRate"></select>
+        </div>
+        <div class="field">
+          <label>Streams to record</label>
+          <div class="checks">
+            <label><input type="checkbox" value="ecg" checked> ECG</label>
+            <label><input type="checkbox" value="imu" checked> IMU9 (acc + gyro + magn)</label>
+            <label><input type="checkbox" value="hr" checked> Heart rate + RR intervals</label>
+            <label><input type="checkbox" value="temp" checked> Temperature</label>
+          </div>
+        </div>
+        <div class="field">
+          <label for="recLabel">Label</label>
+          <input type="text" id="recLabel" placeholder="resting, walking&hellip;" maxlength="40">
+          <div class="field-hint">
+            Goes into the filename and meta.json &mdash; useful as a class label later.
+          </div>
+        </div>
+      </div>
+    </div>
+
     <span class="last-update" id="lastUpdate"></span>
     <span class="gsp-badge" id="gspBadge" style="display: none;"></span>
     <span class="dot" id="statusDot"></span>
     <span id="statusText">offline</span>
   </div>
 </header>
+
+<div class="modal-backdrop" id="saveModal" hidden>
+  <div class="modal">
+    <h2>Recording finished</h2>
+    <div class="sub" id="saveSubtitle"></div>
+    <div class="summary-grid" id="saveSummary"></div>
+    <div class="warn-box" id="saveWarnings" hidden></div>
+    <div class="field">
+      <label for="saveFilename">Save as</label>
+      <input type="text" id="saveFilename">
+      <div class="field-hint" id="saveHint"></div>
+    </div>
+    <div class="form-error" id="saveError" hidden></div>
+    <div class="modal-actions">
+      <button class="btn" id="discardBtn">Discard</button>
+      <button class="btn primary" id="saveBtn">Save&hellip;</button>
+    </div>
+  </div>
+</div>
 
 <main>
   <div class="value-row">
@@ -453,7 +737,277 @@
     };
   }
 
+  // --- Recording ---------------------------------------------------------
+
+  const API = `http://${BACKEND_HOST}`;
+
+  const recordBtn = document.getElementById('recordBtn');
+  const recordBtnLabel = document.getElementById('recordBtnLabel');
+  const recMeta = document.getElementById('recMeta');
+  const settingsBtn = document.getElementById('settingsBtn');
+  const settingsPanel = document.getElementById('settingsPanel');
+  const ecgRate = document.getElementById('ecgRate');
+  const imuRate = document.getElementById('imuRate');
+  const recLabel = document.getElementById('recLabel');
+  const streamChecks = settingsPanel.querySelectorAll('.checks input');
+
+  const saveModal = document.getElementById('saveModal');
+  const saveSubtitle = document.getElementById('saveSubtitle');
+  const saveSummary = document.getElementById('saveSummary');
+  const saveWarnings = document.getElementById('saveWarnings');
+  const saveFilename = document.getElementById('saveFilename');
+  const saveHint = document.getElementById('saveHint');
+  const saveError = document.getElementById('saveError');
+  const saveBtn = document.getElementById('saveBtn');
+  const discardBtn = document.getElementById('discardBtn');
+
+  let isRecording = false;
+  let pendingRecordingId = null;
+  let statusTimer = null;
+
+  const STREAM_NAMES = { ecg: 'ECG', imu: 'IMU9', hr: 'Heart rate', rr: 'RR intervals', temp: 'Temperature' };
+
+  function fillRates(select, rates, current) {
+    select.innerHTML = '';
+    for (const hz of rates) {
+      const option = document.createElement('option');
+      option.value = hz;
+      option.textContent = `${hz} Hz`;
+      option.selected = hz === current;
+      select.appendChild(option);
+    }
+  }
+
+  async function loadRecordingOptions() {
+    try {
+      const res = await fetch(`${API}/recording/options`);
+      const data = await res.json();
+      fillRates(ecgRate, data.ecg_rates_hz, data.current.ecg_hz);
+      fillRates(imuRate, data.imu_rates_hz, data.current.imu_hz);
+      recordBtn.disabled = false;
+      settingsBtn.disabled = false;
+    } catch {
+      recordBtn.disabled = true;
+      settingsBtn.disabled = true;
+    }
+  }
+
+  function selectedStreams() {
+    return Array.from(streamChecks).filter(c => c.checked).map(c => c.value);
+  }
+
+  function setSettingsLocked(locked) {
+    // Changing a rate mid-recording means resubscribing the GSP stream,
+    // which would tear a hole in the data being captured.
+    ecgRate.disabled = locked;
+    imuRate.disabled = locked;
+    recLabel.disabled = locked;
+    streamChecks.forEach(c => { c.disabled = locked; });
+  }
+
+  function formatElapsed(seconds) {
+    const total = Math.floor(seconds);
+    const mm = String(Math.floor(total / 60)).padStart(2, '0');
+    const ss = String(total % 60).padStart(2, '0');
+    return `${mm}:${ss}`;
+  }
+
+  function setRecordingUI(recording) {
+    isRecording = recording;
+    recordBtn.classList.toggle('recording', recording);
+    recordBtnLabel.textContent = recording ? 'Stop' : 'Record';
+    setSettingsLocked(recording);
+    if (!recording) recMeta.textContent = '';
+  }
+
+  async function pollRecordingStatus() {
+    try {
+      const res = await fetch(`${API}/recording/status`);
+      const data = await res.json();
+      if (!data.recording) return;
+      const ecgCount = data.counts.ecg || 0;
+      recMeta.textContent = `${formatElapsed(data.elapsed_s)} · ${ecgCount.toLocaleString()} ECG`;
+    } catch {
+      recMeta.textContent = 'backend unreachable';
+    }
+  }
+
+  async function startRecording() {
+    const streams = selectedStreams();
+    if (streams.length === 0) {
+      settingsPanel.hidden = false;
+      return;
+    }
+
+    recordBtn.disabled = true;
+    recMeta.textContent = 'starting…';
+    try {
+      const res = await fetch(`${API}/recording/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          streams,
+          ecg_hz: Number(ecgRate.value),
+          imu_hz: Number(imuRate.value),
+          label: recLabel.value.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        // The backend refuses rather than recording silence, so surface
+        // exactly why instead of leaving the button looking broken.
+        recMeta.textContent = '';
+        alert(err.detail || `Could not start recording (HTTP ${res.status}).`);
+        return;
+      }
+      settingsPanel.hidden = true;
+      setRecordingUI(true);
+      pollRecordingStatus();
+      statusTimer = setInterval(pollRecordingStatus, 1000);
+    } catch {
+      recMeta.textContent = '';
+      alert('Could not reach the backend.');
+    } finally {
+      recordBtn.disabled = false;
+    }
+  }
+
+  async function stopRecording() {
+    recordBtn.disabled = true;
+    clearInterval(statusTimer);
+    statusTimer = null;
+    try {
+      const res = await fetch(`${API}/recording/stop`, { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || `Could not stop recording (HTTP ${res.status}).`);
+        return;
+      }
+      setRecordingUI(false);
+      showSaveModal(await res.json());
+    } catch {
+      alert('Could not reach the backend.');
+    } finally {
+      recordBtn.disabled = false;
+    }
+  }
+
+  function showSaveModal(summary) {
+    pendingRecordingId = summary.recording_id;
+
+    const label = summary.label ? `“${summary.label}” · ` : '';
+    saveSubtitle.textContent = `${label}${formatElapsed(summary.duration_s)} recorded`;
+
+    saveSummary.innerHTML = '';
+    const counts = summary.counts || {};
+    for (const [key, value] of Object.entries(counts)) {
+      const k = document.createElement('div');
+      k.className = 'k';
+      k.textContent = STREAM_NAMES[key] || key;
+      const v = document.createElement('div');
+      v.className = 'v mono';
+      v.textContent = value.toLocaleString();
+      saveSummary.append(k, v);
+    }
+    if (Object.keys(counts).length === 0) {
+      const k = document.createElement('div');
+      k.className = 'k';
+      k.textContent = 'No samples captured';
+      saveSummary.append(k, document.createElement('div'));
+    }
+
+    if (summary.warnings && summary.warnings.length) {
+      const list = document.createElement('ul');
+      for (const warning of summary.warnings) {
+        const li = document.createElement('li');
+        li.textContent = warning;
+        list.appendChild(li);
+      }
+      saveWarnings.innerHTML = '';
+      saveWarnings.appendChild(list);
+      saveWarnings.hidden = false;
+    } else {
+      saveWarnings.hidden = true;
+    }
+
+    saveFilename.value = summary.suggested_filename;
+    saveHint.textContent = window.showSaveFilePicker
+      ? 'A ZIP holding one CSV per stream, plus meta.json. You pick where it goes.'
+      : 'A ZIP holding one CSV per stream, plus meta.json. This browser has no save '
+        + 'dialog, so it will go to your downloads folder.';
+    saveError.hidden = true;
+    saveBtn.disabled = false;
+    saveModal.hidden = false;
+  }
+
+  async function saveRecording() {
+    if (!pendingRecordingId) return;
+    saveBtn.disabled = true;
+    saveError.hidden = true;
+
+    let name = saveFilename.value.trim() || 'movesense-recording.zip';
+    if (!name.toLowerCase().endsWith('.zip')) name += '.zip';
+
+    try {
+      const res = await fetch(`${API}/recording/${pendingRecordingId}/export.zip`);
+      if (!res.ok) throw new Error(`export failed (HTTP ${res.status})`);
+      const blob = await res.blob();
+
+      if (window.showSaveFilePicker) {
+        // Real save dialog: the user picks the folder and the name.
+        // Chromium-based browsers only, hence the fallback below.
+        let handle;
+        try {
+          handle = await window.showSaveFilePicker({
+            suggestedName: name,
+            types: [{ description: 'ZIP archive', accept: { 'application/zip': ['.zip'] } }],
+          });
+        } catch (err) {
+          if (err.name === 'AbortError') { saveBtn.disabled = false; return; }
+          throw err;
+        }
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      }
+
+      closeSaveModal();
+    } catch (err) {
+      saveError.textContent = `Could not save: ${err.message}`;
+      saveError.hidden = false;
+      saveBtn.disabled = false;
+    }
+  }
+
+  function closeSaveModal() {
+    saveModal.hidden = true;
+    pendingRecordingId = null;
+  }
+
+  recordBtn.addEventListener('click', () => (isRecording ? stopRecording() : startRecording()));
+  settingsBtn.addEventListener('click', () => { settingsPanel.hidden = !settingsPanel.hidden; });
+  saveBtn.addEventListener('click', saveRecording);
+  discardBtn.addEventListener('click', closeSaveModal);
+
+  document.addEventListener('click', (event) => {
+    if (!settingsPanel.hidden
+        && !settingsPanel.contains(event.target)
+        && event.target !== settingsBtn) {
+      settingsPanel.hidden = true;
+    }
+  });
+
   fetchStatus();
+  loadRecordingOptions();
   connect();
 </script>
 
