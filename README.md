@@ -13,9 +13,6 @@ over a WebSocket. The frontend is one HTML file.
 
 <img src="docs/dashboard-screenshot.png" alt="Dashboard showing live heart rate, HRV, temperature, an ECG waveform, and accelerometer traces" width="760">
 
-Status: under development. What is described here works on real hardware,
-but interfaces may change.
-
 ## Run it
 
 ```bash
