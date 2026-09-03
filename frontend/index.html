@@ -1108,7 +1108,13 @@
   syncRecordingState();
   setInterval(syncRecordingState, 5000);
 
+  // The WebSocket server is up the moment uvicorn starts, but the BLE
+  // connect - and the GSP subscribe that sets gsp_available - takes a few
+  // more seconds. A page opened in that window read gsp_available as false
+  // and, with fetchStatus only running on ws.onopen, kept showing "GSP:
+  // unavailable" until a manual reload. Re-poll so the badge catches up.
   fetchStatus();
+  setInterval(fetchStatus, 5000);
   connect();
 </script>
 
