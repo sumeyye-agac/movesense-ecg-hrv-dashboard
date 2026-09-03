@@ -18,11 +18,10 @@ over a WebSocket. The frontend is one HTML file.
 The hardware: a Movesense MD sensor in its chest belt, and the electrode
 pads on the inside that pick up the ECG.
 
-<img src="docs/dashboard-1.png" alt="Top of the dashboard: recording controls, heart rate, HRV and temperature, and a live ECG waveform" width="760">
+<img src="docs/dashboard.png" alt="The whole dashboard during a recording: sampling rate and stream controls, heart rate, HRV and temperature, and live ECG, accelerometer, gyroscope and magnetometer traces" width="700">
 
-<img src="docs/dashboard-2.png" alt="Rest of the same page: gyroscope and magnetometer traces, and per-second packet counts" width="760">
-
-Top and bottom of the same page.
+The whole page, 15 seconds into a session labelled `jumping` — the
+accelerometer dips are the jumps.
 
 ## Run it
 
