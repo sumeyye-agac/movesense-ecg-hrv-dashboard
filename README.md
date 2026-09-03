@@ -11,6 +11,10 @@ over a WebSocket. The frontend is one HTML file.
 
 [![tests](https://github.com/sumeyye-agac/movesense-ecg-hrv-dashboard/actions/workflows/tests.yml/badge.svg)](https://github.com/sumeyye-agac/movesense-ecg-hrv-dashboard/actions/workflows/tests.yml)
 
+<img src="docs/sensor.jpg" alt="A Movesense MD sensor clipped into its chest belt" width="760">
+
+The hardware: a Movesense MD sensor in its chest belt.
+
 <img src="docs/dashboard-1.png" alt="Top of the dashboard: recording controls, heart rate, HRV and temperature, and a live ECG waveform" width="760">
 
 <img src="docs/dashboard-2.png" alt="Rest of the same page: gyroscope and magnetometer traces, and per-second packet counts" width="760">
