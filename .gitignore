@@ -9,3 +9,6 @@ venv/
 
 # macOS
 .DS_Store
+
+# Raw sensor recordings - personal health data, never goes in the repo
+analysis/data/
