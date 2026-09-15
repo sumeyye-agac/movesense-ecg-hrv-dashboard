@@ -32,6 +32,7 @@ document for these resources.
 from __future__ import annotations
 
 import asyncio
+import math
 import struct
 from typing import Callable, Optional
 
@@ -54,7 +55,7 @@ CMD_UNSUBSCRIBE = 2
 ECG_SUBSCRIBE_REF = 42
 IMU_SUBSCRIBE_REF = 43
 TEMP_SUBSCRIBE_REF = 44
-DEFAULT_IMU_SAMPLE_RATE_HZ = 52
+DEFAULT_IMU_SAMPLE_RATE_HZ = 104  # 208 Hz showed frequent mis-merged GSP fragments; 104 Hz recorded clean
 DEFAULT_ECG_SAMPLE_RATE_HZ = 125  # confirmed valid for this sensor via /Meas/ECG/Info's AvailableSampleRates
 
 # Rates Movesense documents for these resources. GSP has no GET verb -
@@ -68,6 +69,16 @@ VALID_IMU_RATES_HZ = (13, 26, 52, 104, 208, 416)
 
 # Raw ECG integer -> millivolts, from Movesense's own API reference docs.
 ECG_LSB_TO_MV = 0.000381469726563
+
+# Plausibility bounds used as an independent defense layer against corrupt
+# samples (mis-merged GSP fragments, dropped BLE packets, etc.) - see
+# _decode_and_dispatch. Not physiological limits per se, just wide enough to
+# never reject a real reading while still catching garbage (e.g. reading
+# raw floats/ints out of a misaligned buffer, which tends to produce huge
+# or near-zero values, not merely "unusual" ones).
+IMU_ACCEL_MAGNITUDE_MIN_MS2 = 3.0
+IMU_ACCEL_MAGNITUDE_MAX_MS2 = 25.0
+ECG_ABS_MV_MAX = 50.0
 
 
 def _decode_ecg(payload: bytes):
@@ -136,6 +147,8 @@ class MovesenseBLE:
         self.on_disconnect = on_disconnect
         self.gsp_available = False
         self._pending_parts: dict[int, bytes] = {}
+        self._rejected_imu_samples = 0
+        self._rejected_ecg_samples = 0
 
     @staticmethod
     async def discover(name_hint: str = "Movesense", timeout: float = 8.0):
@@ -308,10 +321,24 @@ class MovesenseBLE:
         try:
             if ref == ECG_SUBSCRIBE_REF:
                 timestamp, mv_samples = _decode_ecg(payload)
+                if any(abs(v) >= ECG_ABS_MV_MAX for v in mv_samples):
+                    self._rejected_ecg_samples += 1
+                    if self._rejected_ecg_samples % 100 == 0:
+                        print(f"[GSP] rejected {self._rejected_ecg_samples} implausible ECG "
+                              f"packets so far (|mV| >= {ECG_ABS_MV_MAX})")
+                    return
                 if self.on_ecg:
                     self.on_ecg(timestamp, mv_samples)
             elif ref == IMU_SUBSCRIBE_REF:
                 timestamp, acc, gyro, magn = _decode_imu9(payload)
+                if any(not (IMU_ACCEL_MAGNITUDE_MIN_MS2 <= math.sqrt(x * x + y * y + z * z)
+                            <= IMU_ACCEL_MAGNITUDE_MAX_MS2) for x, y, z in acc):
+                    self._rejected_imu_samples += 1
+                    if self._rejected_imu_samples % 100 == 0:
+                        print(f"[GSP] rejected {self._rejected_imu_samples} implausible IMU9 "
+                              f"packets so far (accel magnitude outside "
+                              f"[{IMU_ACCEL_MAGNITUDE_MIN_MS2}, {IMU_ACCEL_MAGNITUDE_MAX_MS2}] m/s^2)")
+                    return
                 if self.on_imu:
                     self.on_imu(timestamp, acc, gyro, magn)
             elif ref == TEMP_SUBSCRIBE_REF:
