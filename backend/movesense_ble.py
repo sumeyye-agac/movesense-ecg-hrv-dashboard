@@ -135,6 +135,7 @@ class MovesenseBLE:
         self.on_temp = on_temp
         self.on_disconnect = on_disconnect
         self.gsp_available = False
+        self._pending_parts: dict[int, bytes] = {}
 
     @staticmethod
     async def discover(name_hint: str = "Movesense", timeout: float = 8.0):
@@ -278,19 +279,45 @@ class MovesenseBLE:
 
         if response_code in (0x02, 0x03):
             payload = bytes(data[2:])
-            try:
-                if ref == ECG_SUBSCRIBE_REF:
-                    timestamp, mv_samples = _decode_ecg(payload)
-                    if self.on_ecg:
-                        self.on_ecg(timestamp, mv_samples)
-                elif ref == IMU_SUBSCRIBE_REF:
-                    timestamp, acc, gyro, magn = _decode_imu9(payload)
-                    if self.on_imu:
-                        self.on_imu(timestamp, acc, gyro, magn)
-                elif ref == TEMP_SUBSCRIBE_REF:
-                    timestamp, celsius = _decode_temp(payload)
-                    if self.on_temp:
-                        self.on_temp(timestamp, celsius)
-            except (struct.error, IndexError) as e:
-                print(f"[GSP] failed to decode payload for ref={ref}: {e}")
+
+            if response_code == 0x02:
+                # Might be the whole message, or might have a part-2 coming.
+                # We won't know until we see what arrives next for this ref -
+                # decode the *previous* complete message for this ref now
+                # (if any), then start buffering this one.
+                self._flush_pending(ref)
+                self._pending_parts[ref] = payload
+                return
+
+            # response_code == 0x03 (DATA_PART2): completes whatever part-1
+            # is currently buffered for this ref.
+            part1 = self._pending_parts.pop(ref, None)
+            if part1 is None:
+                print(f"[GSP] got DATA_PART2 for ref={ref} with no buffered part-1, dropping")
+                return
+            self._decode_and_dispatch(ref, part1 + payload)
+
+    def _flush_pending(self, ref: int):
+        """A buffered part-1 with no part-2 that ever arrived was actually
+        complete on its own - decode it now, before it gets overwritten."""
+        pending = self._pending_parts.pop(ref, None)
+        if pending is not None:
+            self._decode_and_dispatch(ref, pending)
+
+    def _decode_and_dispatch(self, ref: int, payload: bytes):
+        try:
+            if ref == ECG_SUBSCRIBE_REF:
+                timestamp, mv_samples = _decode_ecg(payload)
+                if self.on_ecg:
+                    self.on_ecg(timestamp, mv_samples)
+            elif ref == IMU_SUBSCRIBE_REF:
+                timestamp, acc, gyro, magn = _decode_imu9(payload)
+                if self.on_imu:
+                    self.on_imu(timestamp, acc, gyro, magn)
+            elif ref == TEMP_SUBSCRIBE_REF:
+                timestamp, celsius = _decode_temp(payload)
+                if self.on_temp:
+                    self.on_temp(timestamp, celsius)
+        except (struct.error, IndexError) as e:
+            print(f"[GSP] failed to decode payload for ref={ref}: {e}")
 
