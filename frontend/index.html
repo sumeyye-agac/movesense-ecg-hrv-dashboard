@@ -897,7 +897,7 @@
       const status = await statusRes.json();
       const sensor = await sensorRes.json();
 
-      if (!ecgRate.options.length || !isRecording) {
+      if (!ecgRate.options.length || status.recording) {
         fillRates(ecgRate, options.ecg_rates_hz, options.current.ecg_hz);
         fillRates(imuRate, options.imu_rates_hz, options.current.imu_hz);
       }
