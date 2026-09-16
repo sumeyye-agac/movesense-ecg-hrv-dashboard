@@ -80,7 +80,7 @@ def train(dataset: pd.DataFrame, test_sessions: set[str]):
     if train_df.empty:
         raise ValueError("no training rows left after holding out --test-session")
 
-    model = LogisticRegression(max_iter=1000)
+    model = LogisticRegression(max_iter=1000, class_weight="balanced")
     model.fit(train_df[feature_cols], train_df["label"])
 
     metrics = {}
