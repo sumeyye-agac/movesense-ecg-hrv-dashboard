@@ -73,13 +73,17 @@ accurate spacing but is relative to its boot; the host's wall clock is
 absolute but carries BLE batching jitter. Rather than pick one:
 
 - `t_s` — seconds since the recording started. Convenience axis. The very
-  first row can be a few milliseconds negative: the streams share one
-  device clock, whichever packet lands first anchors it, and another
-  stream's packet may carry an earlier timestamp because it was sampled
-  just before you pressed Record and only delivered just after.
+  first row can be a few milliseconds negative: each stream anchors its
+  own device clock at that stream's first packet, and a packet may carry
+  an earlier timestamp because it was sampled just before you pressed
+  Record and only delivered just after.
 - `t_device_ms` — the sensor's own monotonic clock, uint32 wraps undone.
-- `t_unix` — absolute time derived from the device clock, anchored to the
-  host clock once at the first packet. **Use this one for analysis.**
+  ECG, IMU9 and temp each report their own Timestamp field and are not
+  the same counter (they were observed to disagree by a roughly constant
+  offset), so this is tracked and unwrapped separately per stream.
+- `t_unix` — absolute time derived from that stream's device clock,
+  anchored to the host clock once at that stream's first packet. **Use
+  this one for analysis.**
 - `t_recv_unix` — when the packet reached the host. Samples from one
   packet share it, so the gap against `t_unix` is BLE latency.
 

@@ -48,7 +48,7 @@ from datetime import datetime, timezone
 
 # The device clock is a uint32 of milliseconds, so it wraps roughly every
 # 49.7 days of sensor uptime. A backward jump larger than this threshold
-# is a wrap; anything smaller is just two streams' packets interleaving.
+# is a wrap.
 _UINT32 = 2 ** 32
 _WRAP_THRESHOLD = 2 ** 31
 
@@ -101,13 +101,18 @@ class Recorder:
         self.started_unix = 0.0
         self.stopped_unix = 0.0
 
-        # Device-clock anchor, set by the first packet that carries one.
-        self._anchor_unix = None
-        self._anchor_device_ms = None
+        # Device-clock anchor, set independently per stream by that
+        # stream's first packet. ECG and IMU9 report their own Timestamp
+        # field per Movesense's Whiteboard API - they are not the same
+        # counter, and were observed to disagree by a roughly constant
+        # ~1.6s. Anchoring them together made every alternation between
+        # streams look like a multi-second backward clock jump.
+        self._anchor_unix: dict[str, float | None] = {"ecg": None, "imu": None, "temp": None}
+        self._anchor_device_ms: dict[str, float | None] = {"ecg": None, "imu": None, "temp": None}
 
-        # uint32 unwrap state, shared across streams (one device clock).
-        self._wrap_offset = 0
-        self._last_raw_device_ms = None
+        # uint32 unwrap state, per stream (see anchor comment above).
+        self._wrap_offset: dict[str, int] = {"ecg": 0, "imu": 0, "temp": 0}
+        self._last_raw_device_ms: dict[str, int | None] = {"ecg": None, "imu": None, "temp": None}
 
         # Raw packets: expanded into rows at export time. t_unix is resolved
         # here at capture rather than at export, because a sensor reboot
@@ -185,7 +190,7 @@ class Recorder:
 
     # --- clock ---------------------------------------------------------
 
-    def _device_time(self, raw_device_ms: int, recv_unix: float) -> int:
+    def _device_time(self, stream: str, raw_device_ms: int, recv_unix: float) -> int:
         """Turn a raw packet timestamp into a continuous device-clock value.
 
         Two discontinuities have to be told apart. The clock is a uint32 of
@@ -196,31 +201,36 @@ class Recorder:
         later sample dated an hour before the recording began, quietly and
         with no error. So re-anchor instead, keeping the timeline monotonic
         and noting it happened.
+
+        State is tracked per stream: ECG and IMU9 report their own
+        Timestamp field independently, and comparing one stream's packet
+        against another's previous value produces spurious backward jumps
+        every time delivery order alternates between them.
         """
-        previous = self._last_raw_device_ms
+        previous = self._last_raw_device_ms[stream]
         if previous is not None:
             if raw_device_ms < previous - _WRAP_THRESHOLD:
-                self._wrap_offset += _UINT32
+                self._wrap_offset[stream] += _UINT32
             elif raw_device_ms < previous - _CLOCK_RESTART_THRESHOLD_MS:
                 self._clock_restarts += 1
                 self._gaps.append({
                     "unix": recv_unix,
-                    "reason": "device clock restarted - the sensor appears to have "
-                              "rebooted; timestamps were re-anchored here",
+                    "reason": f"{stream} device clock restarted - the sensor appears to "
+                              "have rebooted; timestamps were re-anchored here",
                 })
-                self._wrap_offset = 0
-                self._anchor_unix = None  # forces a fresh anchor below
+                self._wrap_offset[stream] = 0
+                self._anchor_unix[stream] = None  # forces a fresh anchor below
 
-        self._last_raw_device_ms = raw_device_ms
-        device_ms = raw_device_ms + self._wrap_offset
+        self._last_raw_device_ms[stream] = raw_device_ms
+        device_ms = raw_device_ms + self._wrap_offset[stream]
 
-        if self._anchor_unix is None:
-            self._anchor_unix = recv_unix
-            self._anchor_device_ms = device_ms
+        if self._anchor_unix[stream] is None:
+            self._anchor_unix[stream] = recv_unix
+            self._anchor_device_ms[stream] = device_ms
         return device_ms
 
-    def _to_unix(self, device_ms: float) -> float:
-        return self._anchor_unix + (device_ms - self._anchor_device_ms) / 1000.0
+    def _to_unix(self, stream: str, device_ms: float) -> float:
+        return self._anchor_unix[stream] + (device_ms - self._anchor_device_ms[stream]) / 1000.0
 
     def _over_budget(self, stream: str, buffered: int) -> bool:
         if buffered < MAX_SAMPLES_PER_STREAM:
@@ -237,10 +247,10 @@ class Recorder:
                 return
             if self._over_budget("ecg", self._ecg_samples):
                 return
-            device_ms = self._device_time(packet_ts_ms, recv_unix)
-            self._ecg.append((device_ms, self._to_unix(device_ms), recv_unix, mv_samples))
+            device_ms = self._device_time("ecg", packet_ts_ms, recv_unix)
+            self._ecg.append((device_ms, self._to_unix("ecg", device_ms), recv_unix, mv_samples))
             self._ecg_samples += len(mv_samples)
-            self._last_device_row = (self._to_unix(device_ms), recv_unix)
+            self._last_device_row = (self._to_unix("ecg", device_ms), recv_unix)
 
     def record_imu(self, packet_ts_ms: int, acc, gyro, magn, recv_unix: float):
         with self._lock:
@@ -248,10 +258,10 @@ class Recorder:
                 return
             if self._over_budget("imu", self._imu_samples):
                 return
-            device_ms = self._device_time(packet_ts_ms, recv_unix)
-            self._imu.append((device_ms, self._to_unix(device_ms), recv_unix, acc, gyro, magn))
+            device_ms = self._device_time("imu", packet_ts_ms, recv_unix)
+            self._imu.append((device_ms, self._to_unix("imu", device_ms), recv_unix, acc, gyro, magn))
             self._imu_samples += len(acc)
-            self._last_device_row = (self._to_unix(device_ms), recv_unix)
+            self._last_device_row = (self._to_unix("imu", device_ms), recv_unix)
 
     def record_temp(self, packet_ts_ms: int, celsius: float, recv_unix: float):
         with self._lock:
@@ -259,8 +269,8 @@ class Recorder:
                 return
             if self._over_budget("temp", len(self._temp)):
                 return
-            device_ms = self._device_time(packet_ts_ms, recv_unix)
-            self._temp.append((device_ms, self._to_unix(device_ms), recv_unix, celsius))
+            device_ms = self._device_time("temp", packet_ts_ms, recv_unix)
+            self._temp.append((device_ms, self._to_unix("temp", device_ms), recv_unix, celsius))
 
     def record_hr(self, bpm: int, sdnn_ms, rr_intervals_ms: list, recv_unix: float):
         with self._lock:
@@ -542,8 +552,8 @@ class Recorder:
             "duration_s": round(self.stopped_unix - self.started_unix, 3),
             "streams": files,
             "clock": {
-                "anchor_unix": self._anchor_unix,
-                "anchor_device_ms": self._anchor_device_ms,
+                "anchor_unix": dict(self._anchor_unix),
+                "anchor_device_ms": dict(self._anchor_device_ms),
                 "drift_ms_at_stop": self._drift_ms(),
                 "timestamp_gap_anomalies": self._anomalies(),
                 "clock_restarts": self._clock_restarts,
@@ -557,14 +567,17 @@ class Recorder:
                                     "packet timestamps - sample spacing follows this, not "
                                     "rate_hz, because the two do not always agree",
                 "t_s": "seconds since the recording started. The first row can be "
-                       "slightly negative: streams share one device clock, whichever "
-                       "packet arrives first anchors it, and another stream's packet "
-                       "may carry an earlier timestamp because it was sampled before "
-                       "the button was pressed and only delivered afterwards",
-                "t_device_ms": "the sensor's own monotonic clock, uint32 wraps unwrapped; "
-                               "empty for hr/rr, which have no device clock",
-                "t_unix": "absolute time derived from the device clock, anchored to the "
-                          "host clock at the first packet - use this one for analysis",
+                       "slightly negative: each stream anchors its own device clock to "
+                       "the host clock at that stream's first packet, and a packet may "
+                       "carry an earlier timestamp because it was sampled before the "
+                       "button was pressed and only delivered afterwards",
+                "t_device_ms": "the sensor's own clock for that stream (ECG, IMU9 and "
+                               "temp each report their own Timestamp field and are not "
+                               "the same counter), uint32 wraps unwrapped; empty for "
+                               "hr/rr, which have no device clock",
+                "t_unix": "absolute time derived from that stream's device clock, "
+                          "anchored to the host clock at that stream's first packet - "
+                          "use this one for analysis",
                 "t_recv_unix": "when the BLE packet reached the host; samples from the same "
                                "packet share it, so the gap against t_unix is BLE latency",
                 "rr_ms": "inter-beat intervals in delivery order; absolute beat times are "
@@ -625,9 +638,12 @@ class Recorder:
             "clock is absolute but is only stamped when a packet arrives, and Bluetooth",
             "delivers ECG and IMU9 in batches of many samples at once. `t_unix` combines",
             "them: the sensor's spacing, anchored to the computer's clock once at the",
-            "start. `t_recv_unix` is kept so the gap between the two - the Bluetooth",
-            "delivery latency - stays visible instead of being baked invisibly into the",
-            "timeline. Samples from one packet share a `t_recv_unix`; that is expected.",
+            "start. Each stream (ECG, IMU9, temp) anchors itself independently - they",
+            "report their own Timestamp field and are not the same counter, so mixing",
+            "them up would misdate one stream by that offset. `t_recv_unix` is kept so",
+            "the gap between the two - the Bluetooth delivery latency - stays visible",
+            "instead of being baked invisibly into the timeline. Samples from one packet",
+            "share a `t_recv_unix`; that is expected.",
             "",
             "## Loading it",
             "",
@@ -644,10 +660,10 @@ class Recorder:
             "  asked for. The two can differ - IMU9 subscribed at 52 Hz tends to deliver",
             "  about 54 - so `meta.json` records `rate_hz` and `measured_rate_hz`",
             "  separately for each stream.",
-            "- **The first row's `t_s` can be a few milliseconds negative.** The streams",
-            "  share one device clock and whichever packet arrives first anchors it;",
-            "  another stream's packet may carry an earlier timestamp because it was",
-            "  sampled just before recording began and only delivered just after.",
+            "- **The first row's `t_s` can be a few milliseconds negative.** Each stream",
+            "  anchors its own device clock at its own first packet; a packet may carry",
+            "  an earlier timestamp because it was sampled just before recording began",
+            "  and only delivered just after.",
             "- **Magnetometer values are raw and uncalibrated.** They carry a hard-iron",
             "  offset, so their magnitude is not Earth's field strength. Calibrate by",
             "  rotating the sensor through many orientations and fitting a sphere.",
