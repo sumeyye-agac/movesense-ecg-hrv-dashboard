@@ -55,7 +55,7 @@ CMD_UNSUBSCRIBE = 2
 ECG_SUBSCRIBE_REF = 42
 IMU_SUBSCRIBE_REF = 43
 TEMP_SUBSCRIBE_REF = 44
-DEFAULT_IMU_SAMPLE_RATE_HZ = 104  # 208 Hz showed frequent mis-merged GSP fragments; 104 Hz recorded clean
+DEFAULT_IMU_SAMPLE_RATE_HZ = 208
 DEFAULT_ECG_SAMPLE_RATE_HZ = 125  # confirmed valid for this sensor via /Meas/ECG/Info's AvailableSampleRates
 
 # Rates Movesense documents for these resources. GSP has no GET verb -

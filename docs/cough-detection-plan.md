@@ -11,8 +11,10 @@ isn't on this machine).
 
 Use the existing dashboard (`README.md` → "Recording"). Settings:
 
-- **IMU9 at 104 Hz** — 208 Hz recordings showed frequent GSP fragment
-  mis-merges (spurious `clock_restarts`); 104 Hz is the validated clean rate.
+- **IMU9 at 208 Hz** — higher sample rate, as the literature recommends.
+  (Briefly dropped to 104 Hz after 208 Hz recordings showed spurious
+  `clock_restarts`; that turned out to be a recording.py bug comparing
+  timestamps across streams, not a 208 Hz problem, so 208 Hz is back.)
 - **Multiple separate `cough` sessions**, not one long one. Spread across
   sitting, standing, and a little walking. Aim for roughly 30–50
   individual coughs in total across all sessions.
