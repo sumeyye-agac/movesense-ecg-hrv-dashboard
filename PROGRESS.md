@@ -3,6 +3,28 @@
 Tracking progress against `docs/cough-detection-plan.md`. Newest entries on
 top.
 
+## 2026-09-21
+
+**Track B — first real-data pass, cross-validated.** Collected 12 recording
+sessions on real hardware (6 `cough`, 6 `baseline`), leading to 43 confirmed
+cough events across the 5 sessions used for training. Ran leave-one-session-
+out cross-validation instead of trusting a single train/test split: mean
+recall 0.785 (range 0.650–0.949 across the 5 folds), mean precision 0.197
+(range 0.154–0.219). Recall is workable; precision is bottlenecked
+specifically by talking/laughing, which the model can't yet separate from a
+cough's motion signature.
+
+Also added `class_weight="balanced"` to the classifier (`d7c98fa`) and wrote
+`analysis/cross_validate.py` for the leave-one-session-out evaluation above
+(`87bb71a`) — both now pushed to `origin/main` along with this status doc.
+
+Full detail — the data table, the labelling method, the per-fold numbers, and
+what's left — is in `docs/cough-detection-status.md`, added today.
+
+**Track A — still not started.** The gated `suunto-movesense-medical-sw`
+source tree is still not present on this machine; nothing beyond the 2026-09-12
+entry below has changed.
+
 ## 2026-09-12
 
 **Track A — blocked at A2.** Docker is installed (`docker --version` →
