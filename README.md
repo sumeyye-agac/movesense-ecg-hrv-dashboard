@@ -64,8 +64,31 @@ Heart rate arrives over the standard Bluetooth Heart Rate Service. ECG,
 IMU9 and temperature arrive over GSP, Movesense's own protocol, which
 delivers measurements as binary payloads whose layout is not published. The
 decoders were worked out from live captures and checked against known
-physical values rather than assumed. [docs/protocol.md](docs/protocol.md)
-has the details, including the one channel that is still unverified.
+physical values rather than assumed. The backend decodes every payload
+into physical units and sends them over the WebSocket, and the dashboard
+plots them.
+
+How far each signal is checked:
+
+- Heart rate and RR intervals: standard Bluetooth service, no decoding
+  of our own.
+- Accelerometer: verified. Magnitude at rest reads about 9.8 m/s².
+- Temperature: verified. Reads about 33.8 °C on the chest; the other
+  field order gives 0 K.
+- ECG: best-effort. Samples are scaled by Movesense's published
+  conversion factor (1 LSB = 0.000381469726563 mV) and give a smooth,
+  plausible waveform, but the amplitude has not been checked against a
+  reference device.
+- Gyroscope: best-effort. The block layout is tested, but no physical
+  check has been done on the values.
+- Magnetometer: not verified. Values are stable, but the absolute scale
+  cannot be confirmed without calibration. Treat it as raw output.
+
+The layout hypothesis came from Movesense's Whiteboard API schemas.
+Movesense's own
+[gatt_sensordata_app](https://www.movesense.com/docs/esw/sample_applications/)
+ships a Python client that parses the same ECG and IMU9 data.
+[docs/protocol.md](docs/protocol.md) has the details and all sources.
 
 ## Requirements
 
@@ -75,6 +98,25 @@ has the details, including the one channel that is still unverified.
   software repository. Request access via medical@movesense.com.
 - Python 3.10+.
 - macOS, Linux or Windows with Bluetooth LE.
+
+## Related work
+
+Other open-source Movesense projects:
+
+- [sensein/movesense-py](https://github.com/sensein/movesense-py):
+  Python toolkit for live BLE streaming, flash datalogger download, and
+  a browser viewer.
+- [JonathanPosthuma/movesense-ecg-imu-toolkit](https://github.com/JonathanPosthuma/movesense-ecg-imu-toolkit):
+  desktop GUI for offline log extraction to CSV and live ECG streaming.
+- [JonasPrimbs/movesense-ble-ecg-firmware](https://github.com/JonasPrimbs/movesense-ble-ecg-firmware):
+  custom sensor firmware that exposes ECG and IMU over a standard BLE
+  GATT service.
+- [EvanKat/movesense_bleak](https://github.com/EvanKat/movesense_bleak):
+  a Python wrapper around bleak for reading Movesense sensors.
+
+This repository is narrower: it reads the stock MD firmware over GSP,
+shows every stream on one local web page and records labelled sessions
+to CSV, with no flash logging or custom firmware.
 
 ## Security
 
