@@ -62,11 +62,17 @@ written up in [docs/data-format.md](docs/data-format.md).
 
 Heart rate arrives over the standard Bluetooth Heart Rate Service. ECG,
 IMU9 and temperature arrive over GSP, Movesense's own protocol, which
-delivers measurements as binary payloads whose layout is not published. The
-decoders were worked out from live captures and checked against known
-physical values rather than assumed. The backend decodes every payload
-into physical units and sends them over the WebSocket, and the dashboard
-plots them.
+delivers measurements as binary SBEM payloads. Movesense's written docs
+do not describe the byte layout in prose, but it can be recovered: their
+official
+[gatt_sensordata_app](https://www.movesense.com/docs/esw/sample_applications/)
+Python client parses the ECG and IMU9 payloads, and the Whiteboard API
+schemas list the fields. The decoders here were built from live
+captures, with a layout hypothesis taken from those schemas, and checked
+against known physical values rather than assumed. The schemas were not
+enough on their own: temperature arrives in the reverse of the schema's
+field order. The backend decodes every payload into physical units and
+sends them over the WebSocket, and the dashboard plots them.
 
 How far each signal is checked:
 
@@ -84,10 +90,6 @@ How far each signal is checked:
 - Magnetometer: not verified. Values are stable, but the absolute scale
   cannot be confirmed without calibration. Treat it as raw output.
 
-The layout hypothesis came from Movesense's Whiteboard API schemas.
-Movesense's own
-[gatt_sensordata_app](https://www.movesense.com/docs/esw/sample_applications/)
-ships a Python client that parses the same ECG and IMU9 data.
 [docs/protocol.md](docs/protocol.md) has the details and all sources.
 
 ## Requirements
