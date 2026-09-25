@@ -10,5 +10,8 @@ venv/
 # macOS
 .DS_Store
 
-# Raw sensor recordings - personal health data, never goes in the repo
+# Raw sensor recordings - personal health data, never goes in the repo.
+# The analysis code moved to sumeyye-agac/chest-imu-cough-detection, but the
+# full recordings (including ECG, HR, RR and temperature) still sit here on
+# disk, so this rule must stay.
 analysis/data/
