@@ -58,6 +58,9 @@ Two things about the data are easy to get wrong: how samples are placed in
 time, and which of the four timestamp columns to use for analysis. Both are
 written up in [docs/data-format.md](docs/data-format.md).
 
+This tool was used to collect the dataset in
+[sumeyye-agac/chest-imu-cough-detection](https://github.com/sumeyye-agac/chest-imu-cough-detection).
+
 ## How it works
 
 Heart rate arrives over the standard Bluetooth Heart Rate Service. ECG,
