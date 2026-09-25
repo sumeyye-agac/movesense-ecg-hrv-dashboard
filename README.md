@@ -165,11 +165,8 @@ is no authentication, so keep the backend on localhost.
 
 </details>
 
-<!--## Extending this
+## Known gaps
 
-- **R-peak detection and ECG-derived HRV** (RMSSD, etc.) on top of the
-  decoded ECG waveform, instead of deriving HRV only from the coarser
-  RR-intervals the standard HR service provides.
 - **Battery level** (`/System/Energy/Level`) was tried and pulled back
   out. The subscribe acknowledges fine (status 200), but the resource
   only notifies *on change*. There's no GET-style one-shot query in the
@@ -178,8 +175,7 @@ is no authentication, so keep the backend on localhost.
   Movesense's own Showcase app sidesteps this with an explicit "GET"
   button for this exact value rather than relying on push
   notifications. Worth revisiting if GSP ever exposes a real GET verb.
-- **Signal quality indicator** for the ECG trace, since electrode
-  contact quality visibly affects it.
-- **Magnetometer calibration.** A rotate-and-fit-a-sphere routine would
-  both remove the hard-iron offset and finally settle whether the decoded
-  scale is right (see docs/protocol.md).-->
+- **Magnetometer calibration.** The decoded scale cannot be confirmed
+  without a rotate-and-fit-a-sphere routine, which would also remove the
+  hard-iron offset. That is why the magnetometer is listed as not
+  verified above (see [docs/protocol.md](docs/protocol.md)).
